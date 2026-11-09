@@ -97,6 +97,8 @@ function drawPaper(ctx, view, color) {
   ctx.restore();
 }
 function drawToolpath() {
+  // The stale warning must be correct even before the (animation-frame) redraw.
+  $('#path-stale').hidden = !programDirty || !toolpath.segments.length;
   if ($('#path-view').hidden) return;
   const canvas = $('#toolpath');
   const container = $('.path-stage');
@@ -114,7 +116,6 @@ function drawToolpath() {
   ctx.fillStyle = color('--bg');
   ctx.fillRect(0, 0, w, h);
   $('#path-empty').hidden = toolpath.segments.length > 0;
-  $('#path-stale').hidden = !programDirty || !toolpath.segments.length;
   $('#path-zoom').textContent = `${Math.round(pathCamera.zoom * 100)}%`;
   if (!toolpath.segments.length) { $('#path-position').hidden = true; return; }
 

@@ -1,49 +1,58 @@
-/* Small, explicit single-line Latin font. No system-font outlines or fabricated Chinese strokes. */
+/* Text layout + single-line G-code generation, and a strict G-code parser for preview. */
 (function (root) {
   'use strict';
-  const strokes = {
-    A:'0,2 1,0 2,2|0.5,1 1.5,1', B:'0,2 0,0 1.4,0 2,.5 1.4,1 0,1|1.4,1 2,1.5 1.4,2 0,2',
-    C:'2,.2 1.5,0 .5,0 0,.5 0,1.5 .5,2 1.5,2 2,1.8', D:'0,2 0,0 1,0 2,.5 2,1.5 1,2 0,2',
-    E:'2,0 0,0 0,2 2,2|0,1 1.5,1', F:'0,2 0,0 2,0|0,1 1.5,1', G:'2,.3 1.5,0 .5,0 0,.5 0,1.5 .5,2 2,2 2,1 1,1',
-    H:'0,0 0,2|2,0 2,2|0,1 2,1', I:'0,0 2,0|1,0 1,2|0,2 2,2', J:'0,0 2,0 2,1.5 1.5,2 .5,2 0,1.5',
-    K:'0,0 0,2|2,0 0,1 2,2', L:'0,0 0,2 2,2', M:'0,2 0,0 1,1 2,0 2,2', N:'0,2 0,0 2,2 2,0',
-    O:'.5,0 1.5,0 2,.5 2,1.5 1.5,2 .5,2 0,1.5 0,.5 .5,0', P:'0,2 0,0 1.5,0 2,.5 1.5,1 0,1',
-    Q:'.5,0 1.5,0 2,.5 2,1.5 1.5,2 .5,2 0,1.5 0,.5 .5,0|1,1 2,2', R:'0,2 0,0 1.5,0 2,.5 1.5,1 0,1|1,1 2,2',
-    S:'2,0 .5,0 0,.5 .5,1 1.5,1 2,1.5 1.5,2 0,2', T:'0,0 2,0|1,0 1,2', U:'0,0 0,1.5 .5,2 1.5,2 2,1.5 2,0',
-    V:'0,0 1,2 2,0', W:'0,0 .5,2 1,1 1.5,2 2,0', X:'0,0 2,2|2,0 0,2', Y:'0,0 1,1 2,0|1,1 1,2', Z:'0,0 2,0 0,2 2,2',
-    0:'.5,0 1.5,0 2,.5 2,1.5 1.5,2 .5,2 0,1.5 0,.5 .5,0|.4,1.7 1.6,.3',
-    1:'.5,.5 1,0 1,2|.3,2 1.7,2', 2:'0,.4 .5,0 1.5,0 2,.5 0,2 2,2', 3:'0,0 2,0 1,1 2,1.5 1.5,2 0,2',
-    4:'1.5,2 1.5,0 0,1.3 2,1.3', 5:'2,0 0,0 0,1 1.5,1 2,1.5 1.5,2 0,2', 6:'2,0 .5,0 0,1.5 .5,2 1.5,2 2,1.5 1.5,1 0,1',
-    7:'0,0 2,0 .5,2', 8:'.5,0 1.5,0 2,.5 0,1.5 .5,2 1.5,2 2,1.5 0,.5 .5,0', 9:'2,1 .5,1 0,.5 .5,0 1.5,0 2,.5 2,1.5 1.5,2 0,2',
-    '-':'0,1 2,1', '.':'.9,1.9 1,2', ',':'1,1.8 .7,2.3', ':':'1,.5 1,.6|1,1.5 1,1.6', '/':'0,2 2,0', '!':'1,0 1,1.4|1,1.9 1,2', '?':'0,.3 .5,0 1.5,0 2,.5 1,1 1,1.4|1,1.9 1,2', '+':'0,1 2,1|1,0 1,2', '=':'0,.7 2,.7|0,1.3 2,1.3'
-  };
+  const Glyphs = typeof module !== 'undefined' && module.exports ? require('./glyphs.js') : root.Glyphs;
+  const defaultResolver = () => Glyphs.createResolver(Glyphs.DEFAULT_SELECTION, new Map([[Glyphs.BUILTIN_ID, Glyphs.builtinLibrary()]]));
+  const WHITESPACE_ADVANCE = .7; // × font size, matches the built-in Latin advance.
+
+  /**
+   * Shared by the paper preview and the generator so both place every character identically.
+   * resolve(index, char) → glyph | null; fallbackAdvance(char) → mm width for characters without a glyph.
+   * Indexes are Unicode code point positions in the original text (used by per-character pins).
+   */
+  function layoutText(text, options, resolve = defaultResolver(), fallbackAdvance = () => options.size * WHITESPACE_ADVANCE) {
+    const { width, height, margin, size, gap, lineGap } = options;
+    const chars = Array.from(text);
+    const placements = [], missing = new Set();
+    let x = margin, y = margin, overflow = false;
+    for (let index = 0; index < chars.length; index++) {
+      let char = chars[index];
+      if (char === '\r') { if (chars[index + 1] === '\n') continue; char = '\n'; }
+      if (char === '\n') { x = margin; y += size + lineGap; continue; }
+      const blank = /\s/.test(char);
+      const glyph = blank ? null : resolve(index, char);
+      if (!blank && !glyph) missing.add(char);
+      const body = blank ? (char === '\t' ? 4 * (size * WHITESPACE_ADVANCE + gap) - gap : size * WHITESPACE_ADVANCE) : glyph ? glyph.advance / glyph.unitsPerEm * size : fallbackAdvance(char);
+      if (x + body > width - margin && x > margin) { x = margin; y += size + lineGap; }
+      if (y + size > height - margin) { overflow = true; break; }
+      if (!blank) placements.push({ index, char, x, y, width: body, glyph });
+      x += body + gap;
+    }
+    return { placements, missing: [...missing], overflow };
+  }
+
   function generate(text, options) {
     const { width, height, margin, size, gap, lineGap, feed, penUp, penDown } = options;
     // Pen zero (work 0,0) in paper mm from the left / bottom edge, and machine axis directions.
     const origin = { x: 0, y: 0, dirX: 1, dirY: 1, ...options.origin };
     if (![origin.x, origin.y].every(Number.isFinite) || ![1, -1].includes(origin.dirX) || ![1, -1].includes(origin.dirY)) throw Error('笔起点或坐标方向无效。');
     if (![width,height,margin,size,gap,lineGap,feed,penUp,penDown].every(Number.isFinite) || width<=0 || height<=0 || size<=0 || feed<=0 || margin<0 || gap<0 || lineGap<0 || margin*2+size>Math.min(width,height) || penUp<=penDown) throw Error('纸张、速度或抬落笔参数无效（抬笔 Z 必须大于落笔 Z）。');
-    const unsupported = [...new Set(Array.from(text).filter(c => !/\s/.test(c) && !strokes[c.toUpperCase()]))];
-    if (unsupported.length) throw Error(`单线字库暂不支持：${unsupported.slice(0,20).join(' ')}。当前支持英文字母、数字和部分标点；中文请导入外部生成的 G-code，不能用系统字体冒充笔迹。`);
+    const result = layoutText(text, options, options.resolve || defaultResolver());
+    if (result.missing.length) throw Error(`字库暂不支持：${result.missing.slice(0,20).join(' ')}${result.missing.length > 20 ? ` 等 ${result.missing.length} 个字` : ''}。请在「字形」面板启用含这些字的字库，或导入外部生成的 G-code；不能用系统字体冒充笔迹。`);
     if (!text.trim()) throw Error('请先输入书写内容。');
+    if (result.overflow) throw Error('内容超出单页，请调整字号或分段生成。');
     const n = value => Number(value.toFixed(3));
     const lines = ['; Single-line text / Z-axis pen profile - review before use',
       `; Pen zero at ${n(origin.x)} mm from paper left, ${n(origin.y)} mm from paper bottom; +X ${origin.dirX > 0 ? 'right' : 'left'}, +Y ${origin.dirY > 0 ? 'up' : 'down'}`,
       'G21', 'G90', 'G17', `G0 Z${n(penUp)}`, `G1 F${n(feed)}`];
-    let x=margin, y=margin;
-    for (const char of text.replace(/\r\n?/g,'\n')) {
-      if (char==='\n') { x=margin; y+=size+lineGap; continue; }
-      const advance = size*.7+gap;
-      if (x+size*.7>width-margin) { x=margin; y+=size+lineGap; }
-      if (y+size*1.15>height-margin) throw Error('内容超出单页，请调整字号或分段生成。');
-      if (!/\s/.test(char)) for (const stroke of strokes[char.toUpperCase()].split('|')) {
-        const points = stroke.split(' ').map(p=>p.split(',').map(Number));
-        const point = p => `X${n(origin.dirX*(x+p[0]*size*.35-origin.x))} Y${n(origin.dirY*(height-y-p[1]*size*.5-origin.y))}`;
-        lines.push(`G0 ${point(points[0])}`, `G1 Z${n(penDown)} F${n(Math.min(feed,300))}`);
-        for (const p of points.slice(1)) lines.push(`G1 ${point(p)} F${n(feed)}`);
+    for (const { x, y, glyph } of result.placements) {
+      const scale = size / glyph.unitsPerEm;
+      const point = p => `X${n(origin.dirX*(x+p[0]*scale-origin.x))} Y${n(origin.dirY*(height-y-p[1]*scale-origin.y))}`;
+      for (const stroke of glyph.strokes) {
+        lines.push(`G0 ${point(stroke[0])}`, `G1 Z${n(penDown)} F${n(Math.min(feed,300))}`);
+        for (const p of stroke.slice(1)) lines.push(`G1 ${point(p)} F${n(feed)}`);
         lines.push(`G0 Z${n(penUp)}`);
       }
-      x+=char==='\t'?advance*4:advance;
     }
     lines.push('; End - pen remains raised, no automatic homing');
     return lines.join('\n');
@@ -113,7 +122,7 @@
     });
     return {segments,errors,commands,bounds,length};
   }
-  const api={generate,parse};
+  const api={generate,parse,layoutText};
   if(typeof module!=='undefined'&&module.exports) module.exports=api;
   else root.PathEngine=api;
 })(typeof window!=='undefined'?window:globalThis);

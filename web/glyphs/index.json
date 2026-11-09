@@ -1,0 +1,11 @@
+{
+  "libraries": [
+    {
+      "id": "demo-variants",
+      "name": "演示变体（程序生成，非手写）",
+      "file": "demo-variants.json",
+      "chars": 45,
+      "description": "由内置单线英文程序变形得到的 4 种写法，仅用于演示选字与变体切换，不代表真实手写。"
+    }
+  ]
+}

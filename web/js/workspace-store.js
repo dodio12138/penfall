@@ -1,6 +1,7 @@
 (function (root) {
   'use strict';
   const KEY = 'web-typewriter:projects:v3';
+  const Glyphs = typeof module !== 'undefined' && module.exports ? require('./glyphs.js') : root.Glyphs;
   const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
   class ConflictError extends Error {}
   // Stored JSON always starts with version + revision (see normalize); read it without parsing megabytes.
@@ -19,7 +20,7 @@
       if (typeof doc.name !== 'string' || !doc.name.trim() || doc.name.length > 120 || /[\\/\u0000-\u001f]/.test(doc.name)) throw Error('文稿名称无效。');
       for (const key of ['content', 'gcode']) if (typeof doc[key] !== 'string' || doc[key].length > 500000) throw Error('文稿 / G-code 需为不超过 500000 字符的文本。');
       const strings = value => Object.fromEntries(Object.entries(value && typeof value === 'object' && !Array.isArray(value) ? value : {}).filter(([key, val]) => key !== '__proto__' && typeof val === 'string'));
-      return { id: doc.id, name: doc.name.trim(), title: typeof doc.title === 'string' ? doc.title.slice(0,120) : '', content: doc.content, gcode: doc.gcode, settings: strings(doc.settings), motion: strings(doc.motion), programDirty: doc.programDirty === true, programSource: ['generated','manual'].includes(doc.programSource) ? doc.programSource : '', view: ['editor','gcode','preview','path'].includes(doc.view) ? doc.view : 'editor', updatedAt: typeof doc.updatedAt === 'string' ? doc.updatedAt : '' };
+      return { id: doc.id, name: doc.name.trim(), title: typeof doc.title === 'string' ? doc.title.slice(0,120) : '', content: doc.content, gcode: doc.gcode, settings: strings(doc.settings), motion: strings(doc.motion), programDirty: doc.programDirty === true, programSource: ['generated','manual'].includes(doc.programSource) ? doc.programSource : '', glyphs: Glyphs.normalizeSelection(doc.glyphs), view: ['editor','gcode','preview','path'].includes(doc.view) ? doc.view : 'editor', updatedAt: typeof doc.updatedAt === 'string' ? doc.updatedAt : '' };
     });
     const openIds = [...new Set((Array.isArray(data.openIds) ? data.openIds : []).filter(id => ids.has(id)))];
     const activeId = ids.has(data.activeId) ? data.activeId : null;

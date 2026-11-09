@@ -12,7 +12,7 @@ test('single-line text generates finite, bounded XY paths and raised final pen',
   assert(result.bounds.minY>=0 && result.bounds.maxY<=297);
   assert.equal(result.segments.at(-1).to.z,5);
 });
-test('unsupported Chinese is rejected instead of rendered as fake strokes', () => assert.throws(()=>generate('你好',options),/单线字库暂不支持/));
+test('unsupported Chinese is rejected instead of rendered as fake strokes', () => assert.throws(()=>generate('你好',options),/字库暂不支持/));
 test('overflow and invalid pen profiles rejected', () => {
   assert.throws(()=>generate('A'.repeat(10000),options),/超出/);
   assert.throws(()=>generate('A',{...options,penUp:0}),/参数无效/);

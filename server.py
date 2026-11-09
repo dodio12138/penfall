@@ -20,7 +20,7 @@ except ImportError:
     serial = None
 
 ROOT = Path(__file__).resolve().parent / 'web'
-STATIC_TYPES = {'.html', '.css', '.js', '.svg', '.gcode', '.ico', '.png'}
+STATIC_TYPES = {'.html', '.css', '.js', '.svg', '.gcode', '.ico', '.png', '.json'}
 
 
 def static_assets(root=ROOT):
@@ -34,6 +34,15 @@ def static_assets(root=ROOT):
 
 
 ASSETS = static_assets()
+
+
+def is_asset(path):
+    """Whitelist check; glyph libraries dropped into web/glyphs/ are picked up without a restart."""
+    global ASSETS
+    path = path.split('?', 1)[0]
+    if path not in ASSETS and path.startswith('/glyphs/'):
+        ASSETS = static_assets()
+    return path in ASSETS
 TOKEN = secrets.token_urlsafe(24)
 SESSION = None
 WORKER = None
@@ -239,14 +248,14 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_HEAD(self):
         # The base class would answer HEAD for any file under ROOT; apply the same whitelist.
-        if self.path.split('?', 1)[0] not in ASSETS:
+        if not is_asset(self.path):
             self.send_error(404)
             return
         return super().do_HEAD()
 
     def do_GET(self):
         if not self.path.startswith('/api/'):
-            if self.path.split('?', 1)[0] not in ASSETS:
+            if not is_asset(self.path):
                 self.send_error(404)
                 return
             return super().do_GET()

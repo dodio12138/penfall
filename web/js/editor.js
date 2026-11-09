@@ -101,36 +101,26 @@ function restoreLegacyDraft() {
   } catch { /* Corrupt legacy draft: start empty, the workspace handles its own recovery. */ }
 }
 
+/** Same layout as the generator (PathEngine.layoutText); characters without a glyph use system-font widths. */
 function makeLayout() {
   const c = config();
   let [width, height] = PAPER_SIZES[c.paper];
   if (c.orientation === 'landscape') [width, height] = [height, width];
   const size = Number(c['font-size']);
-  const margin = Number(c.margin);
-  const letterGap = Number(c['letter-gap']);
-  const lineHeight = size + Number(c['line-gap']);
   const context = $('#preview').getContext('2d');
   context.font = `${size}px ${c.font}`;
-  const glyphs = [];
   const widths = new Map();
-  let x = margin;
-  let y = margin;
-  let overflow = false;
-  for (const char of content.value.replace(/\r\n?/g, '\n')) {
-    if (char === '\n') { x = margin; y += lineHeight; continue; }
-    const printable = char === '\t' ? '    ' : char;
-    if (!widths.has(printable)) widths.set(printable, context.measureText(printable).width);
-    const advance = widths.get(printable) + letterGap;
-    if (x + advance - letterGap > width - margin && x > margin) { x = margin; y += lineHeight; }
-    if (y + size > height - margin) { overflow = true; break; }
-    glyphs.push({ char: printable, x, y });
-    x += advance;
-  }
-  return { width, height, margin, size, font: c.font, paper: c.paper, orientation: c.orientation, glyphs, overflow };
+  const fallbackAdvance = (char) => { if (!widths.has(char)) widths.set(char, context.measureText(char).width); return widths.get(char); };
+  const result = PathEngine.layoutText(content.value, { width, height, margin: Number(c.margin), size, gap: Number(c['letter-gap']), lineGap: Number(c['line-gap']) }, glyphResolver(), fallbackAdvance);
+  return { width, height, margin: Number(c.margin), size, font: c.font, paper: c.paper, orientation: c.orientation, placements: result.placements, glyphs: result.placements, missing: result.missing, overflow: result.overflow };
 }
 function updateLayoutInfo() {
   $('#paper-info').textContent = `${layout.paper.toUpperCase()} · ${layout.orientation === 'landscape' ? '横向' : '纵向'} · ${layout.width} × ${layout.height} mm`;
-  $('#layout-status').textContent = layout.overflow ? '内容超出一页，请缩小字号或分段书写；暂不支持多页。' : '';
+  const notes = [];
+  if (layout.missing?.length) notes.push(`缺字 ${layout.missing.length} 个（红色为系统字体示意，不能生成）`);
+  if (layout.overflow) notes.push('内容超出一页，请缩小字号或分段书写；暂不支持多页');
+  $('#layout-status').textContent = notes.join('；');
+  $('#paper-mode').textContent = layout.missing?.length ? '单线笔迹 + 缺字示意' : '单线笔迹预览';
   updateOriginSummary();
 }
 function previewZoom(stage) {
@@ -167,8 +157,30 @@ function renderPreview() {
   ctx.setLineDash([]);
   ctx.font = `${size}px ${font}`;
   ctx.textBaseline = 'top';
-  ctx.fillStyle = '#30343a';
-  for (const glyph of glyphs) ctx.fillText(glyph.char, glyph.x, glyph.y);
+  ctx.lineCap = ctx.lineJoin = 'round';
+  const pinned = new Set(glyphSelection.pins.map((pin) => pin.at));
+  for (const item of glyphs) {
+    if (!item.glyph) {
+      // No stroke data: show the character in a system font, clearly marked as missing.
+      ctx.fillStyle = '#c2410c';
+      ctx.fillText(item.char, item.x, item.y);
+      continue;
+    }
+    const scale = size / item.glyph.unitsPerEm;
+    ctx.strokeStyle = ctx.fillStyle = '#30343a';
+    ctx.lineWidth = .35;
+    ctx.beginPath();
+    for (const stroke of item.glyph.strokes) {
+      ctx.moveTo(item.x + stroke[0][0] * scale, item.y + stroke[0][1] * scale);
+      if (stroke.length === 1) ctx.lineTo(item.x + stroke[0][0] * scale + .01, item.y + stroke[0][1] * scale);
+      for (const point of stroke.slice(1)) ctx.lineTo(item.x + point[0] * scale, item.y + point[1] * scale);
+    }
+    ctx.stroke();
+    if (pinned.has(item.index)) {
+      ctx.fillStyle = '#1766aa';
+      ctx.fillRect(item.x, item.y + size + .6, item.width, .4);
+    }
+  }
   drawOriginMarker(ctx);
 }
 

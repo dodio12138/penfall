@@ -167,7 +167,7 @@ class BridgeHTTP(unittest.TestCase):
             self.assertEqual(result.exception.code,404)
 
     def test_web_assets_served_and_head_whitelisted(self):
-        for path in ['/','/index.html','/js/common.js','/js/program.js','/css/base.css','/favicon.svg','/demo.gcode']:
+        for path in ['/','/index.html','/js/common.js','/js/program.js','/css/base.css','/favicon.svg','/demo.gcode','/glyphs/index.json','/glyphs/demo-variants.json']:
             with urllib.request.urlopen(self.url+path) as response:
                 self.assertEqual(response.status,200,path)
         for path in ['/server.py','/../server.py','/js/../../grbl.py']:

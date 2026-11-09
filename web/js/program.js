@@ -75,7 +75,7 @@ function setProgram(text, view, source = 'manual', options) {
 function buildProgram() {
   if (!settings.every((id) => validSetting(id, $(`#${id}`).value)) || !motionInputs.every((id) => $(`#${id}`).checkValidity() && $(`#${id}`).value !== '')) throw Error('请修正排版或笔轴参数。');
   const c = config();
-  return PathEngine.generate(content.value, { width: layout.width, height: layout.height, margin: +c.margin, size: +c['font-size'], gap: +c['letter-gap'], lineGap: +c['line-gap'], feed: +$('#feed').value, penUp: +$('#pen-up').value, penDown: +$('#pen-down').value, origin: penOrigin() });
+  return PathEngine.generate(content.value, { width: layout.width, height: layout.height, margin: +c.margin, size: +c['font-size'], gap: +c['letter-gap'], lineGap: +c['line-gap'], feed: +$('#feed').value, penUp: +$('#pen-up').value, penDown: +$('#pen-down').value, origin: penOrigin(), resolve: glyphResolver() });
 }
 function generateProgram(view = 'gcode') {
   clearTimeout(regenerateTimer);

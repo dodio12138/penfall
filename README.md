@@ -80,6 +80,17 @@ python -m venv .venv
 - 发送前，连接弹窗里的纸张宽 / 高会按同一换算转为工件坐标范围（可为负）再由服务端校验。
 - 真机使用：把笔移到设定的零点，在「坐标定位」中 XY 置零。方向设置必须与机器实际一致，请先低速空跑核对。
 
+## 字形库与选字
+
+格式规范见 [docs/glyph-format.md](docs/glyph-format.md)。概要：
+
+- **字形库**（独立 JSON，`web-typewriter/glyph-library` v1）：每个字可有多个写法（变体），每个写法按笔顺存放单线笔画点，可附带压力与时间。来源有三种：内置（`builtin-latin`）、服务器（放进 `web/glyphs/` 并登记在 `index.json`，无需重启）、导入到本浏览器（IndexedDB，不占工作区配额）。
+- **选字设置**（随文稿保存）：启用哪些字库及优先级、选字策略（固定 / 轮换 / 可复现随机 + 种子）、每字默认写法、逐字指定。优先级为：逐字指定 → 每字默认 → 策略。
+- 活动栏「字形」面板管理以上设置并显示缺字；「纸张」页现在显示与 G-code 完全相同的单线笔迹排版，点击某个字可单独指定写法。编辑正文时，逐字指定会跟着原来的字移动；如果那个字被改掉了，指定就作废。
+- 缺字以红色系统字体示意，并阻止生成，不会跳过缺字。
+- `web/glyphs/demo-variants.json` 是由内置字形**程序变形**得到的演示库（`node tools/make-demo-glyphs.cjs` 生成），仅用于体验变体切换，不是真实手写。
+- 工作区备份不含字库；字库请在面板中单独导出。
+
 ## 生成与导入的边界
 
 - 内置示范级单线字库支持 A–Z（小写转大写）、数字及 `- . , : / ! ? + =`，不含中文。生成器遇到不支持的字符会阻止生成，**不会偷偷丢字或把系统字体冒充真实笔迹**。
@@ -149,9 +160,13 @@ TXT 下载为正文原文，不擅自添加标题；G-code 下载为当前代码
 ```
 server.py / grbl.py      USB 桥接（只对外提供 web/ 下的白名单静态文件）
 web/index.html           页面骨架
+web/glyphs/              服务器字库（index.json 登记）
+tools/                   辅助脚本（生成演示字库）
 web/css/                 base（变量与控件）· workspace · toolpath · coordinates
 web/js/common.js         公共工具：$、下载、文件名、行号、日志
-web/js/path-engine.js    单线字库生成与 G-code 解析（亦供 Node 测试）
+web/js/glyphs.js         字形库校验、内置字库、选字（亦供 Node 测试）
+web/js/glyph-manager.js  字库加载 / 导入（IndexedDB）、字形面板、纸张上逐字选写法
+web/js/path-engine.js    排版（预览与生成共用）、G-code 生成与解析（亦供 Node 测试）
 web/js/workspace-store.js  v3 工作区存储与校验（亦供 Node 测试）
 web/js/dialogs.js        页面内弹窗
 web/js/editor.js         正文编辑、纸张预览、视图切换、任务状态
@@ -175,7 +190,7 @@ node --test tests/*.test.js
 
 单元测试包含字形生成、中文拒绝、边界、相对 / 英寸 / 圆弧解析、工作区读写、坏数据保护、配额失败、版本冲突、严格硬件指令验证、模拟控制器应答 / 错误、单读线程与状态交错、分片报告、单位换算、WCO / G92 / TLO 一致性、过期 / 复位失效、G54–G59 切换及 X/Y 设零读回、迟到应答隔离、任务基准变化 / 暂停故障锁释放、机器行程变换、HTTP 密钥与跨来源限制。
 
-浏览器回归脚本为 `tests/workspace.browser.cjs`，需要在测试环境安装 Playwright 并启动 Web 服务。执行 `node tests/workspace.browser.cjs`（笔起点回归：`node tests/origin.browser.cjs`；若 Playwright 浏览器版本不匹配，可设 `CHROME_PATH` 使用本机 Chrome）；可设置 `TEST_URL`、`CHROME_PATH`（使用本机 Chrome）和 `SCREENSHOT`。测试使用独立浏览器上下文，不触碰日常浏览器数据。覆盖文稿 / G-code / 参数隔离、改名复制删除、筛选、查找替换、刷新恢复、备份合并、TXT 原文下载、关闭重开、缩放复位、尺寸调整及跨标签页冲突恢复。
+浏览器回归脚本为 `tests/workspace.browser.cjs`，需要在测试环境安装 Playwright 并启动 Web 服务。执行 `node tests/workspace.browser.cjs`（笔起点回归：`node tests/origin.browser.cjs`；字形回归：`node tests/glyphs.browser.cjs`；若 Playwright 浏览器版本不匹配，可设 `CHROME_PATH` 使用本机 Chrome）；可设置 `TEST_URL`、`CHROME_PATH`（使用本机 Chrome）和 `SCREENSHOT`。测试使用独立浏览器上下文，不触碰日常浏览器数据。覆盖文稿 / G-code / 参数隔离、改名复制删除、筛选、查找替换、刷新恢复、备份合并、TXT 原文下载、关闭重开、缩放复位、尺寸调整及跨标签页冲突恢复。
 
 响应式和下拉回归为 `tests/ui.browser.cjs`，同样使用 Playwright。覆盖 320、360、390、600、768、844、1024、1280、1920、2560px 宽度，包括手机横屏、四个工作分页、九文稿长名称、无顶部横向滚动条、键盘操作、弹窗内下拉边界、触屏长选项、禁用状态同步及纸张自适应。设置 `SCREENSHOT_DIR` 可保存各尺寸截图。测试是浏览器视口 / 触屏模拟，不代表已经实测所有型号手机或浏览器。
 

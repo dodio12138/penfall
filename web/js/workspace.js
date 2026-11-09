@@ -9,7 +9,7 @@
   let data, loading = true, blocked = false, dirty = false, rawRecovery = null;
   let currentView = 'editor', panel = 'files', tabsSignature = '';
   const active = () => data.documents.find(doc => doc.id === data.activeId);
-  const snapshot = () => ({ title: title.value, content: content.value, gcode: codeEditor.value, settings: config(), motion: Object.fromEntries(motionInputs.map(id => [id, $(`#${id}`).value])), programDirty, programSource, view: currentView });
+  const snapshot = () => ({ title: title.value, content: content.value, gcode: codeEditor.value, settings: config(), motion: Object.fromEntries(motionInputs.map(id => [id, $(`#${id}`).value])), programDirty, programSource, glyphs: glyphSelection, view: currentView });
   const displayName = name => (name.trim().replace(/[\\/\u0000-\u001f]/g, '-').replace(/\.(txt|md|gcode|nc|tap)$/i, '').slice(0, 116) || '未命名') + '.txt';
   function uniqueName(name, exceptId, reserved = []) {
     const normalized = displayName(name);
@@ -73,6 +73,7 @@
     $('#find-query').disabled = noDoc;
     for (const id of ['replace-query','replace-one','replace-all']) $(`#${id}`).disabled = locked;
     $('#reload-workspace').disabled = hardwareJob || controllerBusy();
+    if (!loading) scheduleGlyphPanel();
   }
   function renderExplorer() {
     const list = $('#document-list'); list.replaceChildren();
@@ -144,6 +145,7 @@
     for (const id of motionInputs) $(`#${id}`).value = validSetting(id, doc?.motion[id]) ? doc.motion[id] : motionDefaults[id];
     programDirty = doc?.programDirty || false;
     programSource = doc?.programSource || '';
+    setGlyphSelection(doc?.glyphs, content.value);
     clearTimeout(regenerateTimer);
     content.scrollTop = 0; codeEditor.scrollTop = 0;
     currentView = doc?.view || 'editor';
@@ -179,7 +181,7 @@
     if (data.documents.length >= 200) { log('文稿数量上限为 200，请先备份并清理。'); return; }
     const name = await AppDialogs.askText({title:'新建文稿',value:`未命名-${data.documents.length + 1}.txt`,confirmLabel:'新建'});
     if (!name || !canChange() || data.documents.length >= 200) return;
-    const doc = { id: uid(), name: uniqueName(name), title: '', content: '', gcode: '', settings: { ...defaults }, motion: { ...motionDefaults }, programDirty: false, programSource: '', view: 'editor', updatedAt: new Date().toISOString() };
+    const doc = { id: uid(), name: uniqueName(name), title: '', content: '', gcode: '', settings: { ...defaults }, motion: { ...motionDefaults }, programDirty: false, programSource: '', glyphs: Glyphs.normalizeSelection(), view: 'editor', updatedAt: new Date().toISOString() };
     data.documents.push(doc); data.activeId = doc.id; data.openIds.push(doc.id);
     applyDocument(); persist(); showPanel('files');
     closeDrawerOnCompact();
@@ -195,10 +197,12 @@
   function showPanel(name, reveal = true) {
     panel = name;
     if (reveal) document.body.classList.remove('sidebar-hidden');
-    $('#sidebar-label').textContent = ({settings:'书写设置',coordinates:'坐标定位',files:'资源管理器'})[name];
+    $('#sidebar-label').textContent = ({settings:'书写设置',coordinates:'坐标定位',files:'资源管理器',glyphs:'字形'})[name];
     $('#explorer-section').hidden = name !== 'files';
     $('#explorer-actions').hidden = name !== 'files';
     $('#coordinates-section').hidden = name !== 'coordinates';
+    $('#glyphs-section').hidden = name !== 'glyphs';
+    if (name === 'glyphs') renderGlyphPanel();
     for (const id of ['settings-section','motion-section']) $(`#${id}`).hidden = name !== 'settings';
     document.querySelectorAll('[data-panel]').forEach(button => { const selected = button.dataset.panel === name; button.classList.toggle('active', selected); button.setAttribute('aria-pressed', String(selected)); });
   }
@@ -279,7 +283,7 @@
           incoming.push(...normalize(JSON.parse(text)).documents.map(doc => ({ ...doc, id: uid() })));
         } else {
           const isCode = /\.(gcode|nc|tap)$/i.test(file.name);
-          incoming.push({ id:uid(), name:displayName(file.name), title:'', content:isCode?'':text, gcode:isCode?text:'', settings:{...defaults}, motion:{...motionDefaults}, programDirty:false, programSource:isCode?'manual':'', view:isCode?'gcode':'editor', updatedAt:new Date().toISOString() });
+          incoming.push({ id:uid(), name:displayName(file.name), title:'', content:isCode?'':text, gcode:isCode?text:'', settings:{...defaults}, motion:{...motionDefaults}, programDirty:false, programSource:isCode?'manual':'', glyphs:Glyphs.normalizeSelection(), view:isCode?'gcode':'editor', updatedAt:new Date().toISOString() });
         }
       }
       if (!canChange()) return;
