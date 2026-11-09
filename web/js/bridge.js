@@ -152,6 +152,7 @@ async function connectSerial() {
 async function sendJob() {
   parseProgram();
   if (!drawable()) return;
+  if (programDirty) { log('G-code 与当前文稿 / 笔起点不一致（已过期），请重新生成后再发送；未发送任何内容。'); selectView('path'); return; }
   if (!$('#safety-confirm').checked) { openConnection(); $('#bridge-status').textContent = '请先核对并勾选发送前安全确认。'; return; }
   const target = window.Workspace?.activeId, source = codeEditor.value;
   const approved = window.Coordinates?.snapshot();

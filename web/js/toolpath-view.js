@@ -14,7 +14,13 @@ function resetPathCamera() {
  */
 function pathTransform(w, h, camera = pathCamera) {
   const { dirX: sx, dirY: sy } = penOrigin();
-  const b = toolpath.bounds;
+  const b = { ...toolpath.bounds };
+  if (layout.width) {
+    // Fit the paper too, so a program that runs off the page is obvious.
+    const area = paperWorkBounds(layout.width, layout.height);
+    b.minX = Math.min(b.minX, area.xmin); b.maxX = Math.max(b.maxX, area.xmax);
+    b.minY = Math.min(b.minY, area.ymin); b.maxY = Math.max(b.maxY, area.ymax);
+  }
   const minX = sx > 0 ? b.minX : -b.maxX, maxX = sx > 0 ? b.maxX : -b.minX;
   const minY = sy > 0 ? b.minY : -b.maxY, maxY = sy > 0 ? b.maxY : -b.minY;
   const rangeX = Math.max(10, maxX - minX), rangeY = Math.max(10, maxY - minY);
@@ -78,7 +84,7 @@ function drawPaper(ctx, view, color) {
   ctx.strokeRect(Math.round(x0) + .5, Math.round(y0) + .5, Math.round(x1 - x0), Math.round(y1 - y0));
   ctx.setLineDash([]);
   ctx.fillStyle = color('--quiet');
-  ctx.fillText(`${layout.paper.toUpperCase()} 纸张参考`, x0 + 5, Math.max(y0, 0) + 14);
+  ctx.fillText(`${layout.paper.toUpperCase()} 纸张参考`, x0 + 5, Math.min(y1, ctx.canvas.clientHeight || y1) - 6);
   // Pen zero: where the program expects the pen to start.
   const [zx, zy] = view.toScreen({ x: 0, y: 0 });
   ctx.strokeStyle = ctx.fillStyle = color('--accent');
@@ -108,6 +114,7 @@ function drawToolpath() {
   ctx.fillStyle = color('--bg');
   ctx.fillRect(0, 0, w, h);
   $('#path-empty').hidden = toolpath.segments.length > 0;
+  $('#path-stale').hidden = !programDirty || !toolpath.segments.length;
   $('#path-zoom').textContent = `${Math.round(pathCamera.zoom * 100)}%`;
   if (!toolpath.segments.length) { $('#path-position').hidden = true; return; }
 

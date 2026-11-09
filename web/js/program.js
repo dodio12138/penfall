@@ -7,6 +7,9 @@ const codeEditor = $('#gcode');
 const motionInputs = ['feed', 'pen-up', 'pen-down', 'origin-corner', 'origin-x', 'origin-y', 'x-dir', 'y-dir'];
 let toolpath = PathEngine.parse('');
 let programDirty = false;
+// 'generated': exact generator output → kept in sync automatically. 'manual': edited / imported → never rewritten.
+let programSource = '';
+let regenerateTimer;
 let parseTimer;
 let pathDistance = 0;
 
@@ -18,11 +21,11 @@ function programSummary() {
   if (toolpath.errors.length) return `${toolpath.errors.length} 个解析问题，禁止运行`;
   return `${toolpath.commands.length} 行指令 · ${toolpath.segments.length} 段轨迹${programDirty ? ' · 文稿已修改，请重新生成或确认使用现有代码' : ''}`;
 }
-function parseProgram() {
+function parseProgram({ keepCamera = false } = {}) {
   clearTimeout(parseTimer);
   resetSimulation();
   pathDistance = 0;
-  resetPathCamera();
+  if (!keepCamera) resetPathCamera();
   toolpath = PathEngine.parse(codeEditor.value, Number($('#pen-down').value));
   renderLineNumbers($('#gcode-lines'), codeEditor);
   $('#code-errors').textContent = toolpath.errors.slice(0, 6).join('\n') + (toolpath.errors.length > 6 ? `\n… 另有 ${toolpath.errors.length - 6} 个问题` : '');
@@ -62,24 +65,41 @@ function highlightLine(line) {
   codeEditor.setSelectionRange(start, start + (rows[line - 1]?.length || 0));
   scrollToLine(codeEditor, line, $('#gcode-lines'));
 }
-function setProgram(text, view) {
+function setProgram(text, view, source = 'manual', options) {
   codeEditor.value = text;
   programDirty = false;
-  parseProgram();
+  programSource = source;
+  parseProgram(options);
   if (view) selectView(view);
 }
-function generateProgram() {
+function buildProgram() {
+  if (!settings.every((id) => validSetting(id, $(`#${id}`).value)) || !motionInputs.every((id) => $(`#${id}`).checkValidity() && $(`#${id}`).value !== '')) throw Error('请修正排版或笔轴参数。');
+  const c = config();
+  return PathEngine.generate(content.value, { width: layout.width, height: layout.height, margin: +c.margin, size: +c['font-size'], gap: +c['letter-gap'], lineGap: +c['line-gap'], feed: +$('#feed').value, penUp: +$('#pen-up').value, penDown: +$('#pen-down').value, origin: penOrigin() });
+}
+function generateProgram(view = 'gcode') {
+  clearTimeout(regenerateTimer);
   try {
-    if (!settings.every((id) => validSetting(id, $(`#${id}`).value)) || !motionInputs.every((id) => $(`#${id}`).checkValidity() && $(`#${id}`).value !== '')) throw Error('请修正排版或笔轴参数。');
-    const c = config();
-    const text = PathEngine.generate(content.value, { width: layout.width, height: layout.height, margin: +c.margin, size: +c['font-size'], gap: +c['letter-gap'], lineGap: +c['line-gap'], feed: +$('#feed').value, penUp: +$('#pen-up').value, penDown: +$('#pen-down').value, origin: penOrigin() });
-    setProgram(text, 'gcode');
+    setProgram(buildProgram(), view, 'generated');
     log('已生成单线 G-code（毫米 / 绝对坐标 / Z 轴抬笔）。真实发送前必须核对设备兼容性。');
   } catch (error) {
     log(`生成失败，保留原有 G-code：${error.message}`);
     $('#code-errors').textContent = error.message;
-    selectView('gcode');
+    selectView(view);
   }
+}
+/** Generator output follows text / layout / origin edits; manual programs only get marked stale. */
+function scheduleRegenerate() {
+  if (programSource !== 'generated' || !codeEditor.value) return;
+  clearTimeout(regenerateTimer);
+  regenerateTimer = setTimeout(() => {
+    if (programSource !== 'generated' || hardwareJob || controllerBusy() || window.Workspace?.blocked || simulation.state === 'running' || simulation.state === 'paused') return;
+    try { setProgram(buildProgram(), null, 'generated', { keepCamera: true }); }
+    catch (error) {
+      $('#code-state').textContent = `无法自动更新，现有 G-code 已过期：${error.message}`;
+      drawToolpath();
+    }
+  }, 300);
 }
 function downloadProgram() {
   if (!codeEditor.value.trim()) { log('没有可下载的 G-code。'); return; }
@@ -124,8 +144,9 @@ async function startSimulation() {
   simulation.timer = setInterval(() => { if (simulation.state === 'running') stepSimulation(cursor); }, SIM_TICK_MS);
 }
 
-$('#generate').addEventListener('click', generateProgram);
-$('#generate-code').addEventListener('click', generateProgram);
+$('#generate').addEventListener('click', () => generateProgram());
+$('#generate-code').addEventListener('click', () => generateProgram());
+$('#path-regenerate').addEventListener('click', () => generateProgram('path'));
 $('#load-demo').addEventListener('click', async () => {
   if ($('#help-dialog').open) $('#help-dialog').close();
   const target = window.Workspace?.activeId;
@@ -158,6 +179,8 @@ $('#gcode-file').addEventListener('change', async (event) => {
 });
 codeEditor.addEventListener('input', () => {
   programDirty = false;
+  programSource = 'manual';
+  clearTimeout(regenerateTimer);
   resetSimulation('G-code 已修改，模拟重置。');
   renderLineNumbers($('#gcode-lines'), codeEditor);
   window.Workspace?.capture();
@@ -166,7 +189,7 @@ codeEditor.addEventListener('input', () => {
 });
 codeEditor.addEventListener('scroll', () => { $('#gcode-lines').scrollTop = codeEditor.scrollTop; });
 for (const field of [content, ...settings.map((id) => $(`#${id}`)), ...motionInputs.map((id) => $(`#${id}`))]) {
-  field.addEventListener('input', () => { resetSimulation(); markStale(); updateTask(); });
+  field.addEventListener('input', () => { resetSimulation(); markStale(); updateTask(); scheduleRegenerate(); });
 }
 for (const id of motionInputs) $(`#${id}`).addEventListener('input', () => { window.Workspace?.capture(); renderPreview(); drawToolpath(); });
 for (const id of ['machine-x', 'machine-y']) $(`#${id}`).addEventListener('input', updateOriginSummary);

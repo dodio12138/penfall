@@ -21,6 +21,9 @@
 .path-stage canvas:active { cursor: grabbing; }
 #path-empty { position: absolute; top: 50%; width: 100%; padding: 0 18px; transform: translateY(-50%); text-align: center; color: var(--muted); font-size: 13px; pointer-events: none; }
 #path-empty small { display: block; margin-top: 6px; color: var(--quiet); font-size: 11px; }
+#path-stale { position: absolute; top: 10px; left: 12px; right: 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 6px 10px; border: 1px solid #726044; background: var(--warning-bg); color: var(--warning); font-size: 12px; z-index: 1; }
+#path-stale span { flex: 1 1 180px; }
+#path-stale button { min-height: 28px; padding: 3px 10px; font-size: 12px; }
 .path-hud { position: absolute; bottom: 10px; left: 12px; max-width: calc(100% - 24px); padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--muted); font: 11px/1.6 ui-monospace, monospace; pointer-events: none; }
 .path-details { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 8px 12px; padding: 8px 14px; border-top: 1px solid var(--border-subtle); font-size: 11px; color: var(--muted); flex-shrink: 0; }
 #path-stats { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 150px; }

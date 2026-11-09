@@ -9,7 +9,7 @@
   let data, loading = true, blocked = false, dirty = false, rawRecovery = null;
   let currentView = 'editor', panel = 'files', tabsSignature = '';
   const active = () => data.documents.find(doc => doc.id === data.activeId);
-  const snapshot = () => ({ title: title.value, content: content.value, gcode: codeEditor.value, settings: config(), motion: Object.fromEntries(motionInputs.map(id => [id, $(`#${id}`).value])), programDirty, view: currentView });
+  const snapshot = () => ({ title: title.value, content: content.value, gcode: codeEditor.value, settings: config(), motion: Object.fromEntries(motionInputs.map(id => [id, $(`#${id}`).value])), programDirty, programSource, view: currentView });
   const displayName = name => (name.trim().replace(/[\\/\u0000-\u001f]/g, '-').replace(/\.(txt|md|gcode|nc|tap)$/i, '').slice(0, 116) || '未命名') + '.txt';
   function uniqueName(name, exceptId, reserved = []) {
     const normalized = displayName(name);
@@ -143,6 +143,8 @@
     for (const id of settings) $(`#${id}`).value = validSetting(id, doc?.settings[id]) ? doc.settings[id] : defaults[id];
     for (const id of motionInputs) $(`#${id}`).value = validSetting(id, doc?.motion[id]) ? doc.motion[id] : motionDefaults[id];
     programDirty = doc?.programDirty || false;
+    programSource = doc?.programSource || '';
+    clearTimeout(regenerateTimer);
     content.scrollTop = 0; codeEditor.scrollTop = 0;
     currentView = doc?.view || 'editor';
     updateEditor(); layout = makeLayout(); renderPreview(); parseProgram(); selectView(currentView);
@@ -177,7 +179,7 @@
     if (data.documents.length >= 200) { log('文稿数量上限为 200，请先备份并清理。'); return; }
     const name = await AppDialogs.askText({title:'新建文稿',value:`未命名-${data.documents.length + 1}.txt`,confirmLabel:'新建'});
     if (!name || !canChange() || data.documents.length >= 200) return;
-    const doc = { id: uid(), name: uniqueName(name), title: '', content: '', gcode: '', settings: { ...defaults }, motion: { ...motionDefaults }, programDirty: false, view: 'editor', updatedAt: new Date().toISOString() };
+    const doc = { id: uid(), name: uniqueName(name), title: '', content: '', gcode: '', settings: { ...defaults }, motion: { ...motionDefaults }, programDirty: false, programSource: '', view: 'editor', updatedAt: new Date().toISOString() };
     data.documents.push(doc); data.activeId = doc.id; data.openIds.push(doc.id);
     applyDocument(); persist(); showPanel('files');
     closeDrawerOnCompact();
@@ -277,7 +279,7 @@
           incoming.push(...normalize(JSON.parse(text)).documents.map(doc => ({ ...doc, id: uid() })));
         } else {
           const isCode = /\.(gcode|nc|tap)$/i.test(file.name);
-          incoming.push({ id:uid(), name:displayName(file.name), title:'', content:isCode?'':text, gcode:isCode?text:'', settings:{...defaults}, motion:{...motionDefaults}, programDirty:false, view:isCode?'gcode':'editor', updatedAt:new Date().toISOString() });
+          incoming.push({ id:uid(), name:displayName(file.name), title:'', content:isCode?'':text, gcode:isCode?text:'', settings:{...defaults}, motion:{...motionDefaults}, programDirty:false, programSource:isCode?'manual':'', view:isCode?'gcode':'editor', updatedAt:new Date().toISOString() });
         }
       }
       if (!canChange()) return;
