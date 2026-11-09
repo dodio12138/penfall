@@ -65,7 +65,8 @@ function applyHardware(state) {
   hardwareJob = ACTIVE_JOB_STATES.includes(state.state);
   $('#mode-status').textContent = hardwareJob ? '机器任务进行中' : state.connected ? `已连接 ${state.port}` : '未连接机器';
   $('#mode-status').classList.toggle('hardware', hardwareJob);
-  setDeviceIndicator(state.connected ? 'connected' : state.portOpen ? 'warning' : 'idle', state.connected ? `已连接 · ${state.port}` : state.portOpen ? '串口异常 · 需重连' : '未连接');
+  const alarm = state.portOpen && state.coordinates?.alarm;
+  setDeviceIndicator(state.connected && !alarm ? 'connected' : state.portOpen ? 'warning' : 'idle', alarm ? '报警 · 可在「位置」解除' : state.connected ? `已连接 · ${state.port}` : state.portOpen ? '串口异常 · 需重连' : '未连接');
   $('#bridge-status').textContent = state.message;
   if (state.message && state.message !== lastHardwareMessage) { log(`[控制器] ${state.message}`); lastHardwareMessage = state.message; }
   if (hardwareJob) {

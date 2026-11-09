@@ -52,6 +52,7 @@ class Coordinates:
         self.g92 = self.tlo = None
         self.settings = {}
         self.fault = None
+        self.reset_required = False  # critical alarm (limits): GRBL accepts nothing but a reset
         self.sequence = 0
 
     def invalidate_offsets(self):
@@ -67,6 +68,9 @@ class Coordinates:
         if line.startswith('Grbl '):
             self.reset()
             self.fault = '控制器复位，坐标已失效，请重新连接'
+            return
+        if line == '[MSG:Reset to continue]':
+            self.reset_required = True
             return
         if line.startswith('ALARM:'):
             self.invalidate_offsets()
@@ -175,6 +179,8 @@ class Coordinates:
                     reportUnits=None if factor is None else 'inch' if self.report_inches else 'mm',
                     modal=dict(units=self.units, distance=self.distance, feed=self.feed_mode),
                     homingEnabled=None if 22 not in self.settings else bool(self.settings[22]),
+                    alarm=bool((self.machine_state or '').startswith('Alarm') or (self.fault or '').startswith('ALARM:')),
+                    resetRequired=self.reset_required,
                     travel=[self.settings.get(key) for key in (130,131,132)])
 
 
@@ -191,6 +197,7 @@ class Session:
         self.pending = None
         self.alive = True
         self.fault = None
+        self.expect_reset = False  # unlock() resets on purpose: the next banner is expected, not a fault
         self.reader = threading.Thread(target=self._read, daemon=True)
         self.poller = threading.Thread(target=self._poll, daemon=True)
         self.reader.start()
@@ -220,6 +227,12 @@ class Session:
                     if not line:
                         continue
                     with self.condition:
+                        if self.expect_reset and line.startswith('Grbl '):
+                            # Our own reset in unlock(): start over with nothing known, no fault.
+                            self.expect_reset = False
+                            self.model.reset()
+                            self.condition.notify_all()
+                            continue
                         self.model.feed(line)
                         if line.startswith(('Grbl ', 'ALARM:')):
                             self._fail(self.model.fault)
@@ -343,6 +356,50 @@ class Session:
                 if after['wcs'] != before['wcs'] or any(abs(after['wpos']['XYZ'.index(axis)]) > .02 for axis in axes):
                     raise ProtocolError('纸张设零未获读回确认')
             return after
+
+    def unlock(self, reset=False):
+        """Clear an alarm lock with $X. Not homing: after a limit or an abort the controller's position may be wrong,
+        so all coordinates are read back afterwards and the caller must check the pen and the paper zero again.
+        Critical alarms ([MSG:Reset to continue]) need a soft reset first; only done when reset=True."""
+        with self.condition:
+            alarm_fault = bool(self.fault and self.fault.startswith('ALARM:'))
+            in_alarm = (self.model.machine_state or '').startswith('Alarm')
+            if self.fault and not alarm_fault:
+                raise ProtocolError(self.fault)
+            if not alarm_fault and not in_alarm:
+                raise ProtocolError('控制器不在报警状态，无需解除')
+            if self.model.reset_required and not reset:
+                raise ProtocolError('此报警需要先软复位才能解除')
+        if not self.operation.acquire(timeout=1):
+            raise ProtocolError('控制器有任务或正在同步，请稍后重试')
+        self.operation_kind = 'unlock'
+        try:
+            with self.condition:
+                self.fault = None
+                self.model.fault = None
+                self.model.invalidate_offsets()
+                if reset:
+                    self.expect_reset = True
+            if reset:
+                self.realtime(b'\x18')
+                with self.condition:
+                    if not self.condition.wait_for(lambda: not self.expect_reset or self.fault, timeout=5):
+                        self.expect_reset = False
+                        self._fail('软复位后没有收到启动标识，状态未知，请检查机器后重新连接')
+                    if self.fault:
+                        raise ProtocolError(self.fault)
+                time.sleep(.3)  # let the post-reset messages ([MSG:'$H'|'$X' to unlock]) arrive
+            self.command('$X', timeout=3)
+            for query in ('$$', '$G', '$#'):
+                self.command(query, timeout=2)
+            result = self.status(timeout=3)
+            state = (result['machineState'] or '').split(':')[0]
+            if state != 'Idle':
+                raise ProtocolError(f'发送 $X 后控制器状态为 {state or "未知"}，未解除')
+            return result
+        finally:
+            self.operation_kind = None
+            self.operation.release()
 
     def _poll(self):
         last_modal = time.monotonic()

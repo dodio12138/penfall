@@ -270,6 +270,21 @@ class BridgeHTTP(unittest.TestCase):
             with self.assertRaises(urllib.error.HTTPError):self.request('/api/pause',{})
             self.assertEqual(bridge.STATE['state'],'complete')
 
+    def test_unlock_endpoint_requires_review_and_unlocks_an_alarm(self):
+        with self.emulator() as (board,session):
+            board.alarm(3)
+            deadline=time.monotonic()+2
+            while not session.fault and time.monotonic()<deadline: time.sleep(.01)
+            state=self.request('/api/status')
+            self.assertTrue(state['coordinates']['alarm'])
+            with self.assertRaises(urllib.error.HTTPError):
+                self.request('/api/unlock',{})
+            self.assertNotIn(b'$X\n',board.writes)
+            state=self.request('/api/unlock',{'reviewed':True})
+            self.assertEqual(state['coordinates']['machineState'],'Idle')
+            self.assertFalse(state['coordinates']['alarm'])
+            self.assertTrue(state['connected'])
+
     def test_soft_reset_invalidates_coordinates_and_requires_reconnect(self):
         with self.emulator() as (board,session):
             self.start_draining_job(board,session)

@@ -490,6 +490,13 @@ class Handler(SimpleHTTPRequestHandler):
                     action = self.path.rsplit('/', 1)[1]
                     SESSION.coordinate_action(action, data.get('expected'), target=data.get('wcs'), axes=data.get('axes'))
                     update(message='工件坐标系已读回确认' if action == 'wcs' else '纸张 X/Y 设零已读回确认')
+                elif self.path == '/api/unlock':
+                    if SESSION is None or live:
+                        raise ValueError('未连接或有任务运行')
+                    if data.get('reviewed') is not True:
+                        raise ValueError('必须确认解除报警')
+                    SESSION.unlock(reset=data.get('reset') is True)
+                    update(message='报警已解除（$X），未回零：请核对笔的位置和纸张零点')
                 elif self.path == '/api/job':
                     if SESSION is None or live:
                         raise ValueError('未连接或已有任务运行')

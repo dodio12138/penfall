@@ -21,6 +21,15 @@ class FakeGRBL:
         self.fail_code = None
         self.drop_code = None
         self.include_wco = True
+        self.locked_until_reset = False
+
+    def alarm(self, code, critical=False):
+        """Like GRBL: ALARM:n; critical alarms (limits) also require a reset before anything else."""
+        self.machine_state = 'Alarm'
+        self.emit(f'ALARM:{code}')
+        if critical:
+            self.locked_until_reset = True
+            self.emit('[MSG:Reset to continue]')
 
     def emit(self, line):
         self.responses.put((line+'\n').encode())
@@ -46,9 +55,23 @@ class FakeGRBL:
             self.machine_state='Idle'
             return
         if payload == b'\x18':
+            self.locked_until_reset = False
             self.emit("Grbl 1.1h ['$' for help]")
+            if self.machine_state == 'Alarm':
+                self.emit("[MSG:'$H'|'$X' to unlock]")
             return
+        if self.locked_until_reset:
+            return  # critical alarm: GRBL ignores commands until reset
         code = payload.decode().strip()
+        if code == '$X':
+            if self.machine_state == 'Alarm':
+                self.machine_state = 'Idle'
+                self.emit('[MSG:Caution: Unlocked]')
+            self.emit('ok')
+            return
+        if self.machine_state == 'Alarm' and not code.startswith('$'):
+            self.emit('error:9')
+            return
         if code == self.drop_code:
             return
         if code == self.fail_code:

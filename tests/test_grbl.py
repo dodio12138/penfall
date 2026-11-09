@@ -180,3 +180,54 @@ class SerialTransactions(unittest.TestCase):
             self.session.coordinate_action('wcs',self.session.snapshot()['token'],target='G55')
         self.assertEqual(self.board.wcs,'G54')
         self.assertFalse(self.session.snapshot()['ready'])
+
+
+class AlarmUnlock(unittest.TestCase):
+    def setUp(self):
+        self.board=FakeGRBL()
+        self.session=Session(self.board)
+        self.session.refresh()
+
+    def tearDown(self):
+        self.session.close()
+
+    def wait_fault(self):
+        deadline=time.monotonic()+2
+        while not self.session.fault and time.monotonic()<deadline:
+            time.sleep(.01)
+        self.assertTrue(self.session.fault)
+
+    def test_unlock_clears_an_alarm_and_reads_coordinates_back(self):
+        self.board.alarm(3)
+        self.wait_fault()
+        with self.assertRaises(ProtocolError):
+            self.session.command('$G')
+        result=self.session.unlock()
+        self.assertEqual(result['machineState'],'Idle')
+        self.assertIsNone(self.session.fault)
+        self.assertIn(b'$X\n',self.board.writes)
+        self.assertNotIn(b'\x18',self.board.writes,'a plain alarm is unlocked without a reset')
+        self.assertTrue(self.session.status(require_ready=True)['ready'])
+
+    def test_critical_alarm_needs_the_reset_option(self):
+        self.board.alarm(1,critical=True)
+        self.wait_fault()
+        self.assertTrue(self.session.snapshot()['resetRequired'])
+        with self.assertRaisesRegex(ProtocolError,'软复位'):
+            self.session.unlock()
+        self.assertNotIn(b'$X\n',self.board.writes)
+        result=self.session.unlock(reset=True)
+        self.assertEqual(result['machineState'],'Idle')
+        writes=self.board.writes
+        self.assertLess(writes.index(b'\x18'),writes.index(b'$X\n'),'reset first, then $X')
+        self.assertIsNone(self.session.fault)
+        self.assertFalse(self.session.snapshot()['resetRequired'])
+
+    def test_unlock_refused_without_alarm_or_after_other_faults(self):
+        with self.assertRaisesRegex(ProtocolError,'不在报警'):
+            self.session.unlock()
+        self.session._fail('控制器应答超时，事务状态未知，请重新连接')
+        with self.assertRaisesRegex(ProtocolError,'超时'):
+            self.session.unlock()
+        self.assertNotIn(b'$X\n',self.board.writes)
+

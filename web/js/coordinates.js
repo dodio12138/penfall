@@ -2,6 +2,11 @@
 (() => {
   let latest=null, received=0, online=false, frame='work', previousFrame=null, previousJob=false, operationError='';
   const states={Idle:'空闲',Run:'运行',Hold:'暂停',Jog:'点动',Alarm:'报警',Door:'门控',Home:'回零',Sleep:'休眠',Check:'检查'};
+  // GRBL 1.1 alarm codes (Grbl_Esp32 uses the same numbers).
+  const ALARMS={1:'硬限位触发，位置可能已丢失',2:'目标超出软限位（行程）',3:'运动中复位，位置可能已丢失',4:'探针初始状态错误',5:'探针未触发',6:'回零过程中被复位',7:'回零时安全门打开',8:'回零拉回后仍压着限位开关',9:'回零未找到限位开关',10:'回零失败（双轴）'};
+  const alarmText=reason=>{const match=/^ALARM:(\d+)/.exec(reason||'');return match?`报警 ${match[1]}：${ALARMS[match[1]]||'未知报警'}`:reason;};
+  /** Alarm state comes from the raw bridge state: a faulted session reports connected = false but the port stays open. */
+  const alarmState=()=>bridgeHealthy&&hardware.portOpen&&hardware.coordinates?.alarm?hardware.coordinates:null;
   function snapshot() {
     if(!latest||!online)return null;
     const age=(latest.ageMs??Infinity)+(performance.now()-received);
@@ -34,8 +39,14 @@
     for(const id of ['zero-x','zero-y','zero-xy'])$(`#${id}`).disabled=!canMutate();
     $('#refresh-coordinates').disabled=!bridgeHealthy||!hardware.connected||hardwareJob||controllerBusy();
     const reason=coordinateBusy?'正在读回确认…':operationError||(!online?(hardware.portOpen?'数据未知，请重新读取或连接':'连接控制器后读取'):!data?.fresh?'位置未知或已过期':hardwareJob?'':controllerBusy()?'控制器正在同步':!data.ready?data.reason:!data.idle?'控制器非空闲':'');
-    $('#coordinate-reason').textContent=reason;
-    $('#coordinate-reason').hidden=!reason;
+    const alarm=alarmState();
+    const unlock=$('#unlock-alarm');
+    unlock.hidden=!alarm;
+    unlock.disabled=!alarm||coordinateBusy||hardwareJob||controllerBusy();
+    unlock.textContent=alarm?.resetRequired?'复位并解除报警（Ctrl-X、$X）':'解除报警（$X）';
+    const shown=alarm?`${alarmText(alarm.reason)||'控制器处于报警锁定'}。${alarm.resetRequired?'此报警需先软复位。':''}`:alarmText(reason);
+    $('#coordinate-reason').textContent=shown;
+    $('#coordinate-reason').hidden=!shown;
   }
   function machineLimits() {
     const result={};
@@ -79,6 +90,29 @@
     await run('zero',{axes},data.token);
   });
   $('#refresh-coordinates').addEventListener('click',()=>run('refresh'));
+  // $X is not homing: after a limit or an abort the reported position may be wrong. Say so, then read everything back.
+  $('#unlock-alarm').addEventListener('click',async()=>{
+    const alarm=alarmState();
+    if(!alarm||coordinateBusy||hardwareJob)return;
+    const reset=Boolean(alarm.resetRequired);
+    const ok=await AppDialogs.confirm({title:'解除报警',danger:true,confirmLabel:reset?'复位并解除':'解除报警',
+      message:`${alarmText(alarm.reason)||'控制器处于报警锁定'}。${reset?'将先发送软复位（Ctrl-X），再发送 $X。':'将发送 $X 解除报警锁。'}解锁不是回零：报警时机器可能丢步，控制器记录的位置可能不准。请确认笔已离开纸面、机器没有卡住或压着限位；解除后重新核对纸张零点，必要时重新设零。`});
+    if(!ok||!alarmState())return;
+    coordinateBusy=true;operationError='';
+    $('#safety-confirm').checked=false;
+    lockEditors(true);refreshSendButton();render();connectionButtons();
+    try {
+      applyHardware(await api('unlock',{reviewed:true,reset}));
+      log('报警已解除（$X），坐标已重新读回。未回零：发送前请核对笔的位置和纸张零点。');
+    } catch(error) {
+      operationError=`解除报警未成功：${error.message}`;
+      if(error.bridgeState)applyHardware(error.bridgeState);else bridgeUnavailable(error);
+      log(`解除报警未成功：${error.message}。未自动重试。`);
+    } finally {
+      coordinateBusy=false;
+      lockEditors(hardwareJob||controllerBusy());refreshSendButton();render();connectionButtons();
+    }
+  });
   $('#frame-work').addEventListener('click',()=>{frame='work';render();});
   $('#frame-machine').addEventListener('click',()=>{frame='machine';render();});
   window.addEventListener('bridge-state',event=>{
