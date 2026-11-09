@@ -4,6 +4,7 @@
   const Glyphs = typeof module !== 'undefined' && module.exports ? require('./glyphs.js') : root.Glyphs;
   const defaultResolver = () => Glyphs.createResolver(Glyphs.DEFAULT_SELECTION, new Map([[Glyphs.BUILTIN_ID, Glyphs.builtinLibrary()]]));
   const WHITESPACE_ADVANCE = .7; // × font size, matches the built-in Latin advance.
+  const MAX_PAGES = 99;
 
   /**
    * Shared by the paper preview and the generator so both place every character identically.
@@ -14,7 +15,7 @@
     const { width, height, margin, size, gap, lineGap } = options;
     const chars = Array.from(text);
     const placements = [], missing = new Set();
-    let x = margin, y = margin, overflow = false;
+    let x = margin, y = margin, page = 1, overflow = false;
     for (let index = 0; index < chars.length; index++) {
       let char = chars[index];
       if (char === '\r') { if (chars[index + 1] === '\n') continue; char = '\n'; }
@@ -24,11 +25,15 @@
       if (!blank && !glyph) missing.add(char);
       const body = blank ? (char === '\t' ? 4 * (size * WHITESPACE_ADVANCE + gap) - gap : size * WHITESPACE_ADVANCE) : glyph ? glyph.advance / glyph.unitsPerEm * size : fallbackAdvance(char);
       if (x + body > width - margin && x > margin) { x = margin; y += size + lineGap; }
-      if (y + size > height - margin) { overflow = true; break; }
-      if (!blank) placements.push({ index, char, x, y, width: body, glyph });
+      if (y + size > height - margin) {
+        // Continue on a new sheet; the machine writes one page per program.
+        if (page >= MAX_PAGES) { overflow = true; break; }
+        page++; x = margin; y = margin;
+      }
+      if (!blank) placements.push({ index, char, x, y, page, width: body, glyph });
       x += body + gap;
     }
-    return { placements, missing: [...missing], overflow };
+    return { placements, missing: [...missing], overflow, pages: page };
   }
 
   function generate(text, options) {
@@ -40,12 +45,15 @@
     const result = layoutText(text, options, options.resolve || defaultResolver());
     if (result.missing.length) throw Error(`字库暂不支持：${result.missing.slice(0,20).join(' ')}${result.missing.length > 20 ? ` 等 ${result.missing.length} 个字` : ''}。请在「字形」面板启用含这些字的字库，或导入外部生成的 G-code；不能用系统字体冒充笔迹。`);
     if (!text.trim()) throw Error('请先输入书写内容。');
-    if (result.overflow) throw Error('内容超出单页，请调整字号或分段生成。');
+    if (result.overflow) throw Error(`内容超过 ${MAX_PAGES} 页上限，请拆分文稿。`);
+    const page = options.page === undefined ? 1 : options.page;
+    if (!Number.isInteger(page) || page < 1 || page > result.pages) throw Error(`页码无效：共 ${result.pages} 页。`);
     const n = value => Number(value.toFixed(3));
     const lines = ['; Single-line text / Z-axis pen profile - review before use',
       `; Pen zero at ${n(origin.x)} mm from paper left, ${n(origin.y)} mm from paper bottom; +X ${origin.dirX > 0 ? 'right' : 'left'}, +Y ${origin.dirY > 0 ? 'up' : 'down'}`,
+      `; Page ${page} of ${result.pages}`,
       'G21', 'G90', 'G17', `G0 Z${n(penUp)}`, `G1 F${n(feed)}`];
-    for (const { x, y, glyph } of result.placements) {
+    for (const { x, y, glyph } of result.placements.filter((item) => item.page === page)) {
       const scale = size / glyph.unitsPerEm;
       const point = p => `X${n(origin.dirX*(x+p[0]*scale-origin.x))} Y${n(origin.dirY*(height-y-p[1]*scale-origin.y))}`;
       for (const stroke of glyph.strokes) {
@@ -122,7 +130,7 @@
     });
     return {segments,errors,commands,bounds,length};
   }
-  const api={generate,parse,layoutText};
+  const api={generate,parse,layoutText,MAX_PAGES};
   if(typeof module!=='undefined'&&module.exports) module.exports=api;
   else root.PathEngine=api;
 })(typeof window!=='undefined'?window:globalThis);

@@ -112,15 +112,37 @@ function makeLayout() {
   const widths = new Map();
   const fallbackAdvance = (char) => { if (!widths.has(char)) widths.set(char, context.measureText(char).width); return widths.get(char); };
   const result = PathEngine.layoutText(content.value, { width, height, margin: Number(c.margin), size, gap: Number(c['letter-gap']), lineGap: Number(c['line-gap']) }, glyphResolver(), fallbackAdvance);
-  return { width, height, margin: Number(c.margin), size, font: c.font, paper: c.paper, orientation: c.orientation, placements: result.placements, glyphs: result.placements, missing: result.missing, overflow: result.overflow };
+  return { width, height, margin: Number(c.margin), size, font: c.font, paper: c.paper, orientation: c.orientation, placements: result.placements, glyphs: result.placements, missing: result.missing, overflow: result.overflow, pages: result.pages };
+}
+/** Page being previewed / generated (1-based), clamped to the current layout. */
+function currentPage() {
+  const requested = Number($('#page').value);
+  return Math.min(Math.max(1, Number.isInteger(requested) ? requested : 1), layout.pages || 1);
+}
+function setPage(page) {
+  const next = Math.min(Math.max(1, page), layout.pages || 1);
+  if (next === Number($('#page').value)) return;
+  $('#page').value = String(next);
+  $('#page').dispatchEvent(new Event('input', { bubbles: true }));
+}
+function updatePagers() {
+  const page = currentPage(), pages = layout.pages || 1;
+  for (const pager of $$('.pager')) {
+    pager.hidden = pages <= 1;
+    pager.querySelector('.pager-label').textContent = `第 ${page} / ${pages} 页`;
+    pager.querySelector('.pager-prev').disabled = page <= 1;
+    pager.querySelector('.pager-next').disabled = page >= pages;
+  }
 }
 function updateLayoutInfo() {
   $('#paper-info').textContent = `${layout.paper.toUpperCase()} · ${layout.orientation === 'landscape' ? '横向' : '纵向'} · ${layout.width} × ${layout.height} mm`;
   const notes = [];
   if (layout.missing?.length) notes.push(`缺字 ${layout.missing.length} 个（红色为系统字体示意，不能生成）`);
-  if (layout.overflow) notes.push('内容超出一页，请缩小字号或分段书写；暂不支持多页');
+  if (layout.overflow) notes.push(`内容超过 ${PathEngine.MAX_PAGES} 页上限，请拆分文稿`);
+  else if (layout.pages > 1) notes.push(`共 ${layout.pages} 页，每页单独生成与书写，换纸后再发送下一页`);
   $('#layout-status').textContent = notes.join('；');
   $('#paper-mode').textContent = layout.missing?.length ? '单线笔迹 + 缺字示意' : '单线笔迹预览';
+  updatePagers();
   updateOriginSummary();
 }
 function previewZoom(stage) {
@@ -159,7 +181,9 @@ function renderPreview() {
   ctx.textBaseline = 'top';
   ctx.lineCap = ctx.lineJoin = 'round';
   const pinned = new Set(glyphSelection.pins.map((pin) => pin.at));
+  const page = currentPage();
   for (const item of glyphs) {
+    if (item.page !== page) continue;
     if (!item.glyph) {
       // No stroke data: show the character in a system font, clearly marked as missing.
       ctx.fillStyle = '#c2410c';
@@ -259,6 +283,10 @@ $('.view-tabs').addEventListener('keydown', (event) => {
   tabs[index].focus();
 });
 $('#zoom').addEventListener('change', renderPreview);
+for (const pager of $$('.pager')) {
+  pager.querySelector('.pager-prev').addEventListener('click', () => setPage(currentPage() - 1));
+  pager.querySelector('.pager-next').addEventListener('click', () => setPage(currentPage() + 1));
+}
 $('#sidebar-toggle').addEventListener('click', () => document.body.classList.toggle('sidebar-hidden'));
 if (window.innerWidth <= 900) document.body.classList.add('sidebar-hidden');
 ['#connect', '#device-activity'].forEach((id) => $(id).addEventListener('click', openConnection));

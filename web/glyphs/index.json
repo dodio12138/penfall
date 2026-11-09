@@ -6,6 +6,34 @@
       "file": "demo-variants.json",
       "chars": 45,
       "description": "由内置单线英文程序变形得到的 4 种写法，仅用于演示选字与变体切换，不代表真实手写。"
+    },
+    {
+      "id": "hershey-sans",
+      "name": "Hershey 无衬线（单线）",
+      "file": "hershey-sans.json",
+      "chars": 94,
+      "description": "Hershey Futura Light：单线无衬线，含大小写、数字和 ASCII 标点。"
+    },
+    {
+      "id": "hershey-roman",
+      "name": "Hershey 罗马（单线）",
+      "file": "hershey-roman.json",
+      "chars": 94,
+      "description": "Hershey Roman Simplex：单线罗马体，含大小写、数字和 ASCII 标点。"
+    },
+    {
+      "id": "hershey-script",
+      "name": "Hershey 手写体（单线）",
+      "file": "hershey-script.json",
+      "chars": 94,
+      "description": "Hershey Script Simplex：单线斜体手写风格。"
+    },
+    {
+      "id": "hershey-cursive",
+      "name": "Hershey 连笔体（单线）",
+      "file": "hershey-cursive.json",
+      "chars": 94,
+      "description": "Hershey Cursive：单线连笔风格。"
     }
   ]
 }

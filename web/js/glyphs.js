@@ -171,7 +171,37 @@
     });
   }
 
-  const api = { FORMAT, BUILTIN_ID, STRATEGIES, DEFAULT_SELECTION, normalizeLibrary, indexLibrary, builtinLibrary, normalizeSelection, createResolver, candidates, shiftPins };
+  /**
+   * Hershey .jhf (ASCII order, glyph 1 = space) → library. Coordinates are letters relative to 'R';
+   * " R" lifts the pen. Cap height (y −12…9) maps to the em box so 字高 ≈ capital height.
+   */
+  function fromJHF(source, meta) {
+    const lines = [];
+    for (const raw of source.split(/\r?\n/)) {
+      if (!raw.trim()) continue;
+      // Some distributions wrap long glyphs onto continuation lines without a 5-column id.
+      if (/^\s*\d+\s*\d+/.test(raw.slice(0, 8)) || !lines.length) lines.push(raw); else lines[lines.length - 1] += raw;
+    }
+    const units = 1000, capTop = -12, base = 9, scale = units / (base - capTop);
+    const value = (char) => char.charCodeAt(0) - 82;
+    const glyphs = [];
+    lines.forEach((line, index) => {
+      const code = 32 + index;
+      if (code <= 32 || code >= 127) return;
+      const left = value(line[8]), right = value(line[9]);
+      const strokes = [];
+      let stroke = [];
+      for (let i = 10; i + 1 < line.length; i += 2) {
+        if (line[i] === ' ' && line[i + 1] === 'R') { if (stroke.length) strokes.push(stroke); stroke = []; continue; }
+        stroke.push([Math.round((value(line[i]) - left) * scale * 10) / 10, Math.round((value(line[i + 1]) - capTop) * scale * 10) / 10]);
+      }
+      if (stroke.length) strokes.push(stroke);
+      if (strokes.length) glyphs.push({ char: String.fromCharCode(code), variants: [{ id: 'v1', advance: Math.max(1, Math.round((right - left) * scale)), strokes }] });
+    });
+    return normalizeLibrary({ format: FORMAT, version: 1, unitsPerEm: units, license: 'Hershey Fonts：可自由使用、转换与再分发，须附致谢：The Hershey Fonts were originally created by Dr. A. V. Hershey while working at the U. S. National Bureau of Standards. The format of the Font data was originally created by James Hurt, Cognition, Inc.', ...meta, glyphs });
+  }
+
+  const api = { FORMAT, fromJHF, BUILTIN_ID, STRATEGIES, DEFAULT_SELECTION, normalizeLibrary, indexLibrary, builtinLibrary, normalizeSelection, createResolver, candidates, shiftPins };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Glyphs = api;
 })(typeof window !== 'undefined' ? window : globalThis);

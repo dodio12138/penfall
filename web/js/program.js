@@ -4,7 +4,7 @@ const LEGACY_PROGRAM_KEYS = { code: 'web-typewriter:gcode:v1', dirty: 'web-typew
 const SIM_TICK_MS = 50;
 const SIM_RAPID_FEED = 3000; // mm/min estimate for G0 travel moves.
 const codeEditor = $('#gcode');
-const motionInputs = ['feed', 'pen-up', 'pen-down', 'origin-corner', 'origin-x', 'origin-y', 'x-dir', 'y-dir'];
+const motionInputs = ['feed', 'pen-up', 'pen-down', 'origin-corner', 'origin-x', 'origin-y', 'x-dir', 'y-dir', 'page'];
 let toolpath = PathEngine.parse('');
 let programDirty = false;
 // 'generated': exact generator output → kept in sync automatically. 'manual': edited / imported → never rewritten.
@@ -19,7 +19,8 @@ function formatBounds(b) {
 function programSummary() {
   if (!codeEditor.value.trim()) return '尚未生成 / 导入';
   if (toolpath.errors.length) return `${toolpath.errors.length} 个解析问题，禁止运行`;
-  return `${toolpath.commands.length} 行指令 · ${toolpath.segments.length} 段轨迹${programDirty ? ' · 文稿已修改，请重新生成或确认使用现有代码' : ''}`;
+  const page = programSource === 'generated' && layout.pages > 1 ? `第 ${currentPage()} / ${layout.pages} 页 · ` : '';
+  return `${page}${toolpath.commands.length} 行指令 · ${toolpath.segments.length} 段轨迹${programDirty ? ' · 文稿已修改，请重新生成或确认使用现有代码' : ''}`;
 }
 function parseProgram({ keepCamera = false } = {}) {
   clearTimeout(parseTimer);
@@ -75,7 +76,7 @@ function setProgram(text, view, source = 'manual', options) {
 function buildProgram() {
   if (!settings.every((id) => validSetting(id, $(`#${id}`).value)) || !motionInputs.every((id) => $(`#${id}`).checkValidity() && $(`#${id}`).value !== '')) throw Error('请修正排版或笔轴参数。');
   const c = config();
-  return PathEngine.generate(content.value, { width: layout.width, height: layout.height, margin: +c.margin, size: +c['font-size'], gap: +c['letter-gap'], lineGap: +c['line-gap'], feed: +$('#feed').value, penUp: +$('#pen-up').value, penDown: +$('#pen-down').value, origin: penOrigin(), resolve: glyphResolver() });
+  return PathEngine.generate(content.value, { width: layout.width, height: layout.height, margin: +c.margin, size: +c['font-size'], gap: +c['letter-gap'], lineGap: +c['line-gap'], feed: +$('#feed').value, penUp: +$('#pen-up').value, penDown: +$('#pen-down').value, origin: penOrigin(), resolve: glyphResolver(), page: currentPage() });
 }
 function generateProgram(view = 'gcode') {
   clearTimeout(regenerateTimer);
@@ -103,7 +104,8 @@ function scheduleRegenerate() {
 }
 function downloadProgram() {
   if (!codeEditor.value.trim()) { log('没有可下载的 G-code。'); return; }
-  const name = window.Workspace?.activeName ? window.Workspace.activeName.replace(/\.txt$/i, '.gcode') : `${safeFilename(title.value, 'writing')}.gcode`;
+  const suffix = programSource === 'generated' && layout.pages > 1 ? `-p${currentPage()}` : '';
+  const name = window.Workspace?.activeName ? window.Workspace.activeName.replace(/\.txt$/i, `${suffix}.gcode`) : `${safeFilename(title.value, 'writing')}${suffix}.gcode`;
   downloadText(codeEditor.value, name);
 }
 
@@ -188,11 +190,13 @@ codeEditor.addEventListener('input', () => {
   parseTimer = setTimeout(parseProgram, 250);
 });
 codeEditor.addEventListener('scroll', () => { $('#gcode-lines').scrollTop = codeEditor.scrollTop; });
-for (const field of [content, ...settings.map((id) => $(`#${id}`)), ...motionInputs.map((id) => $(`#${id}`))]) {
+for (const field of [content, ...settings.map((id) => $(`#${id}`)), ...motionInputs.filter((id) => id !== 'page').map((id) => $(`#${id}`))]) {
   field.addEventListener('input', () => { resetSimulation(); markStale(); updateTask(); scheduleRegenerate(); });
 }
 for (const id of motionInputs) $(`#${id}`).addEventListener('input', () => { window.Workspace?.capture(); renderPreview(); drawToolpath(); });
 for (const id of ['machine-x', 'machine-y']) $(`#${id}`).addEventListener('input', updateOriginSummary);
+// Switching pages only changes generator output; imported / edited programs are unaffected.
+$('#page').addEventListener('input', () => { if (programSource === 'generated') { resetSimulation(); markStale(); updateTask(); scheduleRegenerate(); } });
 $('#start').addEventListener('click', startSimulation);
 $('#pause').addEventListener('click', () => {
   if (hardwareJob) return void bridgeAction(hardware.state === 'paused' ? 'resume' : 'pause');

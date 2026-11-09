@@ -239,7 +239,9 @@ async function importGlyphLibraries(files) {
   for (const file of files) {
     try {
       if (file.size > 60_000_000) throw Error('文件超过 60 MB。');
-      const library = Glyphs.normalizeLibrary(JSON.parse(await file.text()));
+      const library = /\.jhf$/i.test(file.name)
+        ? Glyphs.fromJHF(await file.text(), { id: `jhf-${file.name.replace(/\.jhf$/i, '').toLowerCase().replace(/[^a-z0-9._-]/g, '-').slice(0, 56)}`, name: `Hershey ${file.name.replace(/\.jhf$/i, '')}`, description: `由 ${file.name} 转换` })
+        : Glyphs.normalizeLibrary(JSON.parse(await file.text()));
       const existing = glyphCatalog.get(library.id);
       if (existing && existing.origin !== 'user') throw Error(`id「${library.id}」与${GLYPH_ORIGIN_NAMES[existing.origin]}字库重名，请修改 id 后再导入。`);
       if (existing && !await AppDialogs.confirm({ title: '替换字库', message: `本浏览器已有字库「${existing.name}」（${library.id}），用新文件替换？引用它的文稿会使用新的字形。`, confirmLabel: '替换' })) continue;
@@ -329,7 +331,8 @@ function placementAt(event) {
   const rect = canvas.getBoundingClientRect();
   const x = (event.clientX - rect.left) / rect.width * layout.width;
   const y = (event.clientY - rect.top) / rect.height * layout.height;
-  return layout.placements?.find((item) => x >= item.x - .5 && x <= item.x + item.width + .5 && y >= item.y - .5 && y <= item.y + layout.size + .5);
+  const page = currentPage();
+  return layout.placements?.find((item) => item.page === page && x >= item.x - .5 && x <= item.x + item.width + .5 && y >= item.y - .5 && y <= item.y + layout.size + .5);
 }
 $('#preview').addEventListener('click', (event) => {
   if (glyphLocked()) return;

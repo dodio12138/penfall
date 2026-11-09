@@ -226,3 +226,6 @@ body.sidebar-hidden .sidebar { display: none; }
 .glyph-picker-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
 .glyph-picker-actions button { font-size: 11px; }
 .glyph-caption { max-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #6b7280; font-size: 9px; line-height: 1.2; }
+.pager { display: inline-flex; align-items: center; gap: 4px; }
+.pager button { min-height: 28px; min-width: 28px; padding: 0 6px; font-size: 14px; line-height: 1; }
+.pager-label { min-width: 74px; text-align: center; font-variant-numeric: tabular-nums; color: var(--text); font-size: 11px; }

@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const { generate, parse } = require('../web/js/path-engine.js');
+const { generate, parse, layoutText } = require('../web/js/path-engine.js');
 const options = { width:210,height:297,margin:20,size:5,gap:1,lineGap:3,feed:1200,penUp:5,penDown:0 };
 test('single-line text generates finite, bounded XY paths and raised final pen', () => {
   const result=parse(generate('Hello 123!',options));
@@ -14,7 +14,7 @@ test('single-line text generates finite, bounded XY paths and raised final pen',
 });
 test('unsupported Chinese is rejected instead of rendered as fake strokes', () => assert.throws(()=>generate('你好',options),/字库暂不支持/));
 test('overflow and invalid pen profiles rejected', () => {
-  assert.throws(()=>generate('A'.repeat(10000),options),/超出/);
+  assert.throws(()=>generate('A'.repeat(200000),options),/页上限/);
   assert.throws(()=>generate('A',{...options,penUp:0}),/参数无效/);
 });
 test('square includes travel, writing, source lines and Z bounds', () => {
@@ -53,4 +53,17 @@ test('pen origin and axis directions shift / flip generated coordinates', () => 
   assert.ok(Math.abs(b.y-(-(a.y-(297-8))))<1e-6);
   assert(shifted.bounds.minY>=0 && shifted.bounds.minX>=-10);
   assert.throws(()=>generate('A',{...options,origin:{x:0,y:0,dirX:2,dirY:1}}),/笔起点/);
+});
+
+test('long text flows onto further pages; each page is generated separately', () => {
+  const text='HELLO WORLD\n'.repeat(80);
+  const layout=layoutText(text,options);
+  assert(layout.pages>=2);
+  assert.equal(layout.placements.at(-1).page,layout.pages);
+  const first=parse(generate(text,{...options,page:1})), second=parse(generate(text,{...options,page:2}));
+  assert.deepEqual(second.errors,[]);
+  assert.match(generate(text,{...options,page:2}),/; Page 2 of /);
+  // Page 2 restarts at the top margin, so both pages occupy the same area of their sheet.
+  assert.equal(first.bounds.maxY,second.bounds.maxY);
+  assert.throws(()=>generate(text,{...options,page:layout.pages+1}),/页码无效/);
 });

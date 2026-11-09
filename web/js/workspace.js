@@ -5,7 +5,7 @@
   try { storage = window.localStorage; }
   catch { storage = { getItem() { throw Error('浏览器禁止本地存储，请允许存储或下载备份。'); }, setItem() { throw Error('浏览器禁止本地存储。'); } }; }
   const store = new Store(storage);
-  const motionDefaults = { feed: '1200', 'pen-up': '5', 'pen-down': '0', ...ORIGIN_DEFAULTS };
+  const motionDefaults = { feed: '1200', 'pen-up': '5', 'pen-down': '0', page: '1', ...ORIGIN_DEFAULTS };
   let data, loading = true, blocked = false, dirty = false, rawRecovery = null;
   let currentView = 'editor', panel = 'files', tabsSignature = '';
   const active = () => data.documents.find(doc => doc.id === data.activeId);
