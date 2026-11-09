@@ -87,6 +87,8 @@ python -m venv .venv
 - 活动栏「字形」面板管理以上设置并显示缺字；「纸张」页现在显示与 G-code 完全相同的单线笔迹排版，点击某个字可单独指定写法。编辑正文时，逐字指定会跟着原来的字移动；如果那个字被改掉了，指定就作废。
 - 缺字以红色系统字体示意，并阻止生成，不会跳过缺字。
 - 服务器自带 4 个 **Hershey 单线字库**（无衬线、罗马、手写体、连笔体，各 94 个 ASCII 字符，含小写和标点），由 `node tools/make-hershey-glyphs.cjs <jhf 目录>` 从 .jhf 转换；授权与致谢见 `web/glyphs/HERSHEY-NOTICE.txt`。「导入字库」也可以直接选 Hershey `.jhf` 文件。
+- **中文单线字库「骨架楷体」**：GB2312 全部 6763 个汉字、中文标点及英文字母数字，由开源楷体字体（SIL OFL 1.1，版权与许可见 `web/glyphs/SKELETON-KAI-NOTICE.txt`）自动骨架化生成：渲染、细化为中线、追踪为笔画、去掉毛刺、把直穿交叉点的笔画连成一笔、平滑简化，再按「从上到下、从左到右」排序。它是字形的中线近似，笔顺为自动推断，个别字可能有多余短笔或断笔；可在纸张页逐字检查，或导入其他字库覆盖。新稿件默认启用（英文仍优先使用内置单线英文；把骨架楷体调到第一位，中英文风格即可统一）。
+- 生成工具：`.venv/bin/python -m pip install -r tools/requirements.txt`，然后运行 `.venv/bin/python tools/skeleton_font.py 字体.ttf 输出.json --id … --name …`（`--chars` 可指定字符，`--preview` 可输出预览图）。可用于任何允许修改的字体。
 - `web/glyphs/demo-variants.json` 是由内置字形**程序变形**得到的演示库（`node tools/make-demo-glyphs.cjs` 生成），仅用于体验变体切换，不是真实手写。
 - 工作区备份不含字库；字库请在面板中单独导出。
 

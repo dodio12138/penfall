@@ -180,10 +180,11 @@ const key = fs.readFileSync(path.join(__dirname, '../.bridge-key'), 'utf8').trim
     await page.reload();
     await page.waitForFunction(() => document.querySelector('#pen-width').value === '1.2');
     assert(await page.locator('#show-pen-width').isChecked());
+    await page.waitForFunction(() => document.querySelectorAll('#document-tabs .document-tab').length > 0); // tabs restored
 
     // Close all tabs → welcome; reopen from the tree. Camera and sidebar resizing still work.
     while (await page.locator('#document-tabs .close-document').count()) await page.locator('#document-tabs .close-document').last().click();
-    assert(await page.locator('#empty-workspace').isVisible());
+    await page.locator('#empty-workspace').waitFor();
     await rowPath('未命名.wtl').click();
     await page.locator('#empty-workspace').waitFor({ state: 'hidden' });
     await page.locator('#path-tab').click();

@@ -87,7 +87,9 @@
     return builtin;
   }
 
-  const DEFAULT_SELECTION = Object.freeze({ libraries: [BUILTIN_ID], strategy: 'first', seed: 1, prefer: {}, pins: [] });
+  // Latin from the built-in set first; Chinese from the server's skeleton Kai library when it is available.
+  const CJK_DEFAULT_ID = 'skeleton-kai';
+  const DEFAULT_SELECTION = Object.freeze({ libraries: [BUILTIN_ID, CJK_DEFAULT_ID], strategy: 'first', seed: 1, prefer: {}, pins: [] });
   function validRef(ref) { return ref && LIBRARY_ID.test(ref.library || '') && VARIANT_ID.test(ref.variant || ''); }
   /** Per-document selection; unknown or malformed parts fall back to defaults, never throw. */
   function normalizeSelection(raw) {

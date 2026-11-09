@@ -5,7 +5,7 @@ const {chromium}=require('playwright');
 const assert=require('node:assert/strict');
 const url=process.env.TEST_URL||'http://127.0.0.1:5173';
 const library={format:'web-typewriter/glyph-library',version:1,id:'test-hand',name:'测试手写',unitsPerEm:1000,glyphs:[
-  {char:'永',variants:[{id:'a',advance:1000,strokes:[[[100,100],[100,900]]]},{id:'b',advance:1000,strokes:[[[200,100],[800,900]]]},{id:'c',advance:1000,strokes:[[[500,500],[600,600]]]}]},
+  {char:'龘',variants:[{id:'a',advance:1000,strokes:[[[100,100],[100,900]]]},{id:'b',advance:1000,strokes:[[[200,100],[800,900]]]},{id:'c',advance:1000,strokes:[[[500,500],[600,600]]]}]},
 ]};
 (async()=>{
   const browser=await chromium.launch({executablePath:process.env.CHROME_PATH||undefined,headless:true});
@@ -17,9 +17,9 @@ const library={format:'web-typewriter/glyph-library',version:1,id:'test-hand',na
       const code=()=>page.locator('#gcode').inputValue();
       const openPanel=async()=>{ if(width<=900&&await page.locator('#sidebar').isHidden())await page.locator('#sidebar-toggle').click(); await page.locator('[data-panel=glyphs]').click(); };
       const closePanel=async()=>{ if(width<=900)await page.locator('#sidebar-backdrop').click({position:{x:width-80,y:20}}); };
-      await page.locator('#content').fill('永永永 AB');
+      await page.locator('#content').fill('龘龘龘 AB');
       await openPanel();
-      assert.match(await page.locator('#glyph-coverage').textContent(),/缺 1 个：永/);
+      assert.match(await page.locator('#glyph-coverage').textContent(),/缺 1 个：龘/);
       await page.locator('#glyph-file').setInputFiles({name:'hand.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(library))});
       await page.waitForFunction(()=>document.querySelector('#glyph-libraries .glyph-library')?.textContent.includes('测试手写'));
       assert.match(await page.locator('#glyph-coverage').textContent(),/全部由启用的字库覆盖/);
@@ -30,16 +30,16 @@ const library={format:'web-typewriter/glyph-library',version:1,id:'test-hand',na
       await page.locator('#gcode-tab').click();
       await page.locator('#generate-code').click();
       let program=await code();
-      assert.match(program,/G0 X20.5 Y276.5\n/); // 永 #1 variant a at x=20 (5 mm font)
-      assert.match(program,/G0 X27 Y276.5\n/);   // 永 #2 variant b at x=26 (5 mm + 1 gap)
-      assert.match(program,/G0 X34.5 Y274.5\n/); // 永 #3 variant c at x=32
-      // Pick a variant for the first 永 directly on the paper.
+      assert.match(program,/G0 X20.5 Y276.5\n/); // 龘 #1 variant a at x=20 (5 mm font)
+      assert.match(program,/G0 X27 Y276.5\n/);   // 龘 #2 variant b at x=26 (5 mm + 1 gap)
+      assert.match(program,/G0 X34.5 Y274.5\n/); // 龘 #3 variant c at x=32
+      // Pick a variant for the first 龘 directly on the paper.
       await page.locator('#preview-tab').click();
       const box=await page.locator('#preview').boundingBox();
       const scale=box.width/210;
       await page.mouse.click(box.x+22.5*scale,box.y+22.5*scale);
       await page.locator('.glyph-picker').waitFor();
-      assert.match(await page.locator('.glyph-picker-heading').textContent(),/「永」第 1 处/);
+      assert.match(await page.locator('.glyph-picker-heading').textContent(),/「龘」第 1 处/);
       await page.locator('.glyph-picker .glyph-choice').nth(2).click();
       await page.waitForFunction(()=>document.querySelector('#gcode').value.includes('G0 X22.5 Y274.5'));
       await openPanel();
@@ -52,7 +52,7 @@ const library={format:'web-typewriter/glyph-library',version:1,id:'test-hand',na
       await page.waitForFunction(()=>document.querySelector('#gcode').value.includes('G0 X27 Y274.5'));
       // Per-character default overrides the strategy (but not the pin).
       await openPanel();
-      const row=page.locator('.glyph-prefer').filter({hasText:'永'});
+      const row=page.locator('.glyph-prefer').filter({hasText:'龘'});
       await row.locator('.glyph-choice').nth(1).click(); // variant a (index 0 is 自动)
       assert.equal(await row.locator('.glyph-choice').nth(1).getAttribute('aria-pressed'),'true');
       await closePanel();
@@ -63,7 +63,7 @@ const library={format:'web-typewriter/glyph-library',version:1,id:'test-hand',na
       // Missing characters: shown as such and block generation.
       await page.locator('#edit-tab').click();
       await page.locator('#content').press('End');
-      await page.locator('#content').type('水');
+      await page.locator('#content').type('𪚥'); // not in any library
       await page.waitForFunction(()=>document.querySelector('#code-state').textContent.includes('无法自动更新'));
       await page.locator('#preview-tab').click();
       assert.match(await page.locator('#layout-status').textContent(),/缺字 1 个/);

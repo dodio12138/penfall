@@ -63,7 +63,7 @@ test('pins follow their characters across edits and drop when the character is e
 });
 
 test('selection normalization never throws and drops invalid parts', () => {
-  assert.deepEqual(Glyphs.normalizeSelection(undefined), { libraries: [Glyphs.BUILTIN_ID], strategy: 'first', seed: 1, prefer: {}, pins: [] });
+  assert.deepEqual(Glyphs.normalizeSelection(undefined), { libraries: [Glyphs.BUILTIN_ID, 'skeleton-kai'], strategy: 'first', seed: 1, prefer: {}, pins: [] });
   const clean = Glyphs.normalizeSelection({ libraries: ['ok', 'BAD', 'ok'], strategy: 'zzz', seed: -1, prefer: { '永': { library: 'ok', variant: 'a' }, xx: {} }, pins: [{ at: 1, char: '永', library: 'ok', variant: 'a' }, { at: 1, char: '永', library: 'ok', variant: 'b' }, { at: -1 }] });
   assert.deepEqual(clean.libraries, ['ok']);
   assert.equal(clean.strategy, 'first');
@@ -83,4 +83,13 @@ test('generator writes imported CJK strokes, scaled to the font size, and blocks
   const layout = layoutText('永 水', options, resolve(), () => 7);
   assert.deepEqual(layout.missing, ['水']);
   assert.equal(layout.placements[1].x, 20 + 10 + 1 + 7 + 1);
+});
+
+test('bundled skeleton Kai library is valid and covers common Chinese, punctuation and ASCII', () => {
+  const raw = require('../web/glyphs/skeleton-kai.json');
+  const library = Glyphs.indexLibrary(Glyphs.normalizeLibrary(raw));
+  for (const char of '的一是在不了有和人这中大为上个国我以要他时来用们，。！？：“”A1') assert(library.chars.has(char), char);
+  assert(library.glyphs.length >= 6800);
+  assert.match(library.license, /Open Font License/);
+  assert.doesNotMatch(library.name, /霞鹜|LXGW/); // OFL: no Reserved Font Name in a modified version
 });

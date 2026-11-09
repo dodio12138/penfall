@@ -67,6 +67,7 @@ const url=process.env.TEST_URL||'http://127.0.0.1:5173';
       const script=page.locator('.glyph-library').filter({hasText:'Hershey 手写体'});
       await script.locator('input').check();
       await script.getByRole('button',{name:/提高优先级/}).click();
+      await page.locator('.glyph-library').filter({hasText:'Hershey 手写体'}).getByRole('button',{name:/提高优先级/}).click();
       await page.waitForFunction(()=>document.querySelector('.glyph-library')?.textContent.includes('Hershey 手写体')&&!document.querySelector('.glyph-library').textContent.includes('加载中'));
       await page.waitForFunction(()=>document.querySelector('#gcode').value.split('\n').length>200);
       assert.match(await page.locator('#glyph-coverage').textContent(),/全部由启用的字库覆盖/);

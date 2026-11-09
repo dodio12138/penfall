@@ -38,7 +38,7 @@ const url=process.env.TEST_URL||'http://127.0.0.1:5173';
     assert(await page.locator('#path-stale').isHidden());
     // Unsupported text keeps the old program but marks it stale instead of silently dropping characters.
     await page.locator('#edit-tab').click();
-    await page.locator('#content').fill('你好');
+    await page.locator('#content').fill('龘'); // not in any enabled library
     await page.waitForFunction(()=>document.querySelector('#code-state').textContent.includes('无法自动更新'));
     assert.deepEqual(errors,[]);
     console.log('Origin checks passed: auto-regenerate on origin / text changes, manual programs flagged stale, unsupported text keeps stale flag.');

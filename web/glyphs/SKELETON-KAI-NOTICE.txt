@@ -1,0 +1,9 @@
+web/glyphs/skeleton-kai.json is a Modified Version (single-line skeleton approximation) of the
+LXGW WenKai Light font (https://github.com/lxgw/LxgwWenKai), produced with tools/skeleton_font.py.
+
+Copyright 2021-2026 LXGW (https://github.com/lxgw/LxgwWenKai), with Reserved Font Name '霞鹜', '霞鶩',
+'落霞孤鹜', '落霞孤鶩' and 'LXGW'. Copyright 2020 The Klee Project Authors.
+As required by the license, this modified version does not use the Reserved Font Names in its name.
+
+Licensed under the SIL Open Font License, Version 1.1 — full text in skeleton-kai.LICENSE.txt.
+Regenerate: .venv/bin/python tools/skeleton_font.py LXGWWenKai-Light.ttf web/glyphs/skeleton-kai.json --id skeleton-kai ...
