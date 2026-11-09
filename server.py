@@ -65,8 +65,12 @@ def snapshot():
 def validate_job(lines, limits):
     if not isinstance(lines, list) or not 1 <= len(lines) <= 20000:
         raise ValueError('程序必须为 1–20000 行')
-    lowz, highz, maxx, maxy = [float(limits[k]) for k in ('zmin', 'zmax', 'x', 'y')]
-    if not all(map(math.isfinite, (lowz, highz, maxx, maxy))) or not (-200 <= lowz < highz <= 200 and 0 < maxx <= 2000 and 0 < maxy <= 2000):
+    # Paper area in work coordinates. The pen zero may sit anywhere on the paper, so ranges can be negative;
+    # legacy clients send only x / y meaning 0..x and 0..y.
+    lowz, highz = float(limits['zmin']), float(limits['zmax'])
+    minx, maxx = float(limits.get('xmin', 0)), float(limits['xmax'] if 'xmax' in limits else limits['x'])
+    miny, maxy = float(limits.get('ymin', 0)), float(limits['ymax'] if 'ymax' in limits else limits['y'])
+    if not all(map(math.isfinite, (lowz, highz, minx, maxx, miny, maxy))) or not (-200 <= lowz < highz <= 200 and -2000 <= minx < maxx <= 2000 and -2000 <= miny < maxy <= 2000 and maxx - minx <= 2000 and maxy - miny <= 2000):
         raise ValueError('纸张坐标范围无效')
     mm = absolute = feed_known = False
     motion_mode = 0
@@ -96,7 +100,7 @@ def validate_job(lines, limits):
             elif letter in 'XYZ':
                 if not mm or not absolute:
                     raise ValueError('运动前必须分别声明 G21 和 G90')
-                lower, upper = (lowz, highz) if letter == 'Z' else (0, maxx if letter == 'X' else maxy)
+                lower, upper = {'X': (minx, maxx), 'Y': (miny, maxy), 'Z': (lowz, highz)}[letter]
                 if not lower <= value <= upper:
                     raise ValueError(f'{letter}={value} 超出确认的纸张坐标范围')
             elif letter == 'F':

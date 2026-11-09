@@ -41,3 +41,16 @@ test('IJ arcs interpolated and bad radii blocked', () => {
 test('unknown commands, coordinate transforms and invalid feeds block execution', () => {
   for(const code of ['G28','G92 X0','G2 X10 R5','M280 P0 S90','G1 F0 X1','G1 X1 X2','G1 X1 garbage','%']) assert(parse(code).errors.length,code);
 });
+
+test('pen origin and axis directions shift / flip generated coordinates', () => {
+  const base=parse(generate('HI',options));
+  // Pen zero 10 mm right of / 8 mm below the paper top-left corner, +Y pointing down the page.
+  const shifted=parse(generate('HI',{...options,origin:{x:10,y:297-8,dirX:1,dirY:-1}}));
+  assert.deepEqual(shifted.errors,[]);
+  const firstDraw=result=>result.segments.find(s=>s.drawing).from;
+  const a=firstDraw(base),b=firstDraw(shifted);
+  assert.ok(Math.abs(b.x-(a.x-10))<1e-6);
+  assert.ok(Math.abs(b.y-(-(a.y-(297-8))))<1e-6);
+  assert(shifted.bounds.minY>=0 && shifted.bounds.minX>=-10);
+  assert.throws(()=>generate('A',{...options,origin:{x:0,y:0,dirX:2,dirY:1}}),/笔起点/);
+});

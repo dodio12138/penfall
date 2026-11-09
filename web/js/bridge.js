@@ -12,7 +12,7 @@ let polling = false;
 let bridgeHealthy = false;
 let jobRequestPending = false;
 let coordinateBusy = false;
-const LOCKED_BY_CONTROLLER = ['#content', '#title', '#gcode', '#generate', '#import-gcode', '#load-demo', '#feed', '#pen-up', '#pen-down', '#machine-x', '#machine-y', '#machine-z-min', '#machine-z-max',
+const LOCKED_BY_CONTROLLER = ['#content', '#title', '#gcode', '#generate', '#import-gcode', '#load-demo', ...motionInputs.map((id) => `#${id}`), '#machine-x', '#machine-y', '#machine-z-min', '#machine-z-max',
   ...settings.map((id) => `#${id}`), ...['x', 'y', 'z'].flatMap((axis) => ['min', 'max'].map((bound) => `#travel-${axis}-${bound}`))];
 
 function controllerBusy() { return coordinateBusy || ['coordinate', 'sync', 'job'].includes(hardware.coordinates?.operation); }
@@ -160,7 +160,9 @@ async function sendJob() {
   if (!machine) { openConnection(); $('#bridge-status').textContent = '请填写并核对机器 XYZ 最小 / 最大行程（机器坐标）。'; return; }
   if (!await AppDialogs.confirm({ title: '发送至真实机器', message: `坐标系 ${approved.wcs}。请核对纸张原点、机器行程与抬落笔方式，并准备好物理急停。`, confirmLabel: '确认发送', danger: true })) return;
   if (!bridgeHealthy || !hardware.connected || hardwareJob || controllerBusy() || window.Coordinates?.snapshot()?.token !== approved.token || window.Workspace?.blocked || !$('#safety-confirm').checked || codeEditor.value !== source || window.Workspace?.activeId !== target) { log('设备或程序状态已改变，请重新检查后发送。'); return; }
-  const limits = { x: +$('#machine-x').value, y: +$('#machine-y').value, zmin: +$('#machine-z-min').value, zmax: +$('#machine-z-max').value };
+  // Paper area (dialog width / height) mapped through the pen origin into work coordinates.
+  const area = paperWorkBounds(+$('#machine-x').value, +$('#machine-y').value);
+  const limits = { ...area, x: +$('#machine-x').value, y: +$('#machine-y').value, zmin: +$('#machine-z-min').value, zmax: +$('#machine-z-max').value };
   const previous = { ...hardware };
   const lines = toolpath.commands.map((command) => command.code);
   jobRequestPending = true;

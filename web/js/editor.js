@@ -7,6 +7,8 @@ const settings = ['paper', 'orientation', 'font', 'font-size', 'line-gap', 'lett
 const defaults = { paper: 'a4', orientation: 'portrait', font: 'serif', 'font-size': '5', 'line-gap': '3', 'letter-gap': '1', margin: '20' };
 const PAPER_SIZES = { a4: [210, 297], a5: [148, 210] };
 const PREVIEW_PX_PER_MM = 2.5;
+const ORIGIN_DEFAULTS = { 'origin-corner': 'bottom-left', 'origin-x': '0', 'origin-y': '0', 'x-dir': '1', 'y-dir': '1' };
+const CORNER_NAMES = { 'bottom-left': '左下角', 'top-left': '左上角', 'top-right': '右上角', 'bottom-right': '右下角' };
 const VIEWS = { editor: 'edit-tab', gcode: 'gcode-tab', preview: 'preview-tab', path: 'path-tab' };
 let simulation = { state: 'idle', done: 0, timer: null };
 let layout = { glyphs: [], overflow: false };
@@ -19,6 +21,56 @@ function validSetting(id, value) {
 }
 function config() {
   return Object.fromEntries(settings.map((id) => [id, validSetting(id, $(`#${id}`).value) ? $(`#${id}`).value : defaults[id]]));
+}
+// --- Pen origin: where work (0,0) sits on the paper, and which way the machine axes point. ---
+function originSetting(id) {
+  const value = $(`#${id}`).value;
+  return validSetting(id, value) ? value : ORIGIN_DEFAULTS[id];
+}
+/** Pen zero in paper mm measured from the paper's left / bottom edge, plus axis signs. */
+function penOrigin(paper = layout) {
+  const corner = originSetting('origin-corner');
+  const dx = Number(originSetting('origin-x')), dy = Number(originSetting('origin-y'));
+  const right = corner.endsWith('right'), top = corner.startsWith('top');
+  return { corner, dx, dy, x: right ? paper.width - dx : dx, y: top ? paper.height - dy : dy, dirX: Number(originSetting('x-dir')), dirY: Number(originSetting('y-dir')) };
+}
+function paperToWork(x, y, origin = penOrigin()) {
+  return { x: origin.dirX * (x - origin.x), y: origin.dirY * (y - origin.y) };
+}
+/** Axis-aligned paper rectangle [0..width]×[0..height] expressed in work coordinates. */
+function paperWorkBounds(width, height, origin = penOrigin()) {
+  const a = paperToWork(0, 0, origin), b = paperToWork(width, height, origin);
+  return { xmin: Math.min(a.x, b.x), xmax: Math.max(a.x, b.x), ymin: Math.min(a.y, b.y), ymax: Math.max(a.y, b.y) };
+}
+const mm = (value) => String(Number((value || 0).toFixed(2)));
+function updateOriginSummary() {
+  const origin = penOrigin();
+  const area = paperWorkBounds(layout.width, layout.height, origin);
+  const horizontal = origin.corner.endsWith('right') ? '右边' : '左边', vertical = origin.corner.startsWith('top') ? '上边' : '下边';
+  $('#origin-summary').textContent = `零点在纸张${CORNER_NAMES[origin.corner]}：距${horizontal} ${mm(origin.dx)} mm、距${vertical} ${mm(origin.dy)} mm。纸张对应工件坐标 X ${mm(area.xmin)}…${mm(area.xmax)} · Y ${mm(area.ymin)}…${mm(area.ymax)}。把笔移到此点后，在「坐标定位」中 XY 置零。`;
+  const dialogArea = paperWorkBounds(Number($('#machine-x').value) || 0, Number($('#machine-y').value) || 0, origin);
+  $('#paper-range-hint').textContent = `按「笔起点」换算后校验：X ${mm(dialogArea.xmin)}…${mm(dialogArea.xmax)} · Y ${mm(dialogArea.ymin)}…${mm(dialogArea.ymax)} mm（工件坐标）。`;
+}
+/** Paper preview marker: pen zero with +X / +Y arrows, drawn in top-down paper mm. */
+function drawOriginMarker(ctx) {
+  const origin = penOrigin();
+  const cx = origin.x, cy = layout.height - origin.y, arm = Math.max(8, Math.min(layout.width, layout.height) * .06);
+  const arrow = (dx, dy, label) => {
+    const ex = cx + dx * arm, ey = cy + dy * arm;
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(ex, ey);
+    ctx.lineTo(ex - dx * 2 - dy * 1.2, ey - dy * 2 - dx * 1.2); ctx.moveTo(ex, ey); ctx.lineTo(ex - dx * 2 + dy * 1.2, ey - dy * 2 + dx * 1.2); ctx.stroke();
+    ctx.fillText(label, ex + dx * 1.5 + (dy ? 1.5 : 0), ey + dy * 1.5 - (dx ? 1.5 : 0));
+  };
+  ctx.save();
+  ctx.strokeStyle = ctx.fillStyle = '#1766aa';
+  ctx.lineWidth = .4;
+  ctx.font = '4px sans-serif';
+  ctx.textBaseline = 'middle';
+  ctx.beginPath(); ctx.arc(cx, cy, 1.6, 0, Math.PI * 2); ctx.stroke();
+  arrow(origin.dirX, 0, 'X+');
+  arrow(0, -origin.dirY, 'Y+');
+  ctx.fillText('笔零点 (0,0)', cx + (origin.corner.endsWith('right') ? -22 : 2.5), cy + (origin.corner.startsWith('top') ? 4 : -4));
+  ctx.restore();
 }
 function activeEditor() {
   return $('#gcode-view').hidden ? content : $('#gcode');
@@ -79,6 +131,7 @@ function makeLayout() {
 function updateLayoutInfo() {
   $('#paper-info').textContent = `${layout.paper.toUpperCase()} · ${layout.orientation === 'landscape' ? '横向' : '纵向'} · ${layout.width} × ${layout.height} mm`;
   $('#layout-status').textContent = layout.overflow ? '内容超出一页，请缩小字号或分段书写；暂不支持多页。' : '';
+  updateOriginSummary();
 }
 function previewZoom(stage) {
   const choice = $('#zoom').value;
@@ -116,6 +169,7 @@ function renderPreview() {
   ctx.textBaseline = 'top';
   ctx.fillStyle = '#30343a';
   for (const glyph of glyphs) ctx.fillText(glyph.char, glyph.x, glyph.y);
+  drawOriginMarker(ctx);
 }
 
 function updateTask() {

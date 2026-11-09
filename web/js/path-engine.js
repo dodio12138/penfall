@@ -19,12 +19,17 @@
   };
   function generate(text, options) {
     const { width, height, margin, size, gap, lineGap, feed, penUp, penDown } = options;
+    // Pen zero (work 0,0) in paper mm from the left / bottom edge, and machine axis directions.
+    const origin = { x: 0, y: 0, dirX: 1, dirY: 1, ...options.origin };
+    if (![origin.x, origin.y].every(Number.isFinite) || ![1, -1].includes(origin.dirX) || ![1, -1].includes(origin.dirY)) throw Error('笔起点或坐标方向无效。');
     if (![width,height,margin,size,gap,lineGap,feed,penUp,penDown].every(Number.isFinite) || width<=0 || height<=0 || size<=0 || feed<=0 || margin<0 || gap<0 || lineGap<0 || margin*2+size>Math.min(width,height) || penUp<=penDown) throw Error('纸张、速度或抬落笔参数无效（抬笔 Z 必须大于落笔 Z）。');
     const unsupported = [...new Set(Array.from(text).filter(c => !/\s/.test(c) && !strokes[c.toUpperCase()]))];
     if (unsupported.length) throw Error(`单线字库暂不支持：${unsupported.slice(0,20).join(' ')}。当前支持英文字母、数字和部分标点；中文请导入外部生成的 G-code，不能用系统字体冒充笔迹。`);
     if (!text.trim()) throw Error('请先输入书写内容。');
     const n = value => Number(value.toFixed(3));
-    const lines = ['; Single-line text / Z-axis pen profile - review before use', 'G21', 'G90', 'G17', `G0 Z${n(penUp)}`, `G1 F${n(feed)}`];
+    const lines = ['; Single-line text / Z-axis pen profile - review before use',
+      `; Pen zero at ${n(origin.x)} mm from paper left, ${n(origin.y)} mm from paper bottom; +X ${origin.dirX > 0 ? 'right' : 'left'}, +Y ${origin.dirY > 0 ? 'up' : 'down'}`,
+      'G21', 'G90', 'G17', `G0 Z${n(penUp)}`, `G1 F${n(feed)}`];
     let x=margin, y=margin;
     for (const char of text.replace(/\r\n?/g,'\n')) {
       if (char==='\n') { x=margin; y+=size+lineGap; continue; }
@@ -33,7 +38,7 @@
       if (y+size*1.15>height-margin) throw Error('内容超出单页，请调整字号或分段生成。');
       if (!/\s/.test(char)) for (const stroke of strokes[char.toUpperCase()].split('|')) {
         const points = stroke.split(' ').map(p=>p.split(',').map(Number));
-        const point = p => `X${n(x+p[0]*size*.35)} Y${n(height-y-p[1]*size*.5)}`;
+        const point = p => `X${n(origin.dirX*(x+p[0]*size*.35-origin.x))} Y${n(origin.dirY*(height-y-p[1]*size*.5-origin.y))}`;
         lines.push(`G0 ${point(points[0])}`, `G1 Z${n(penDown)} F${n(Math.min(feed,300))}`);
         for (const p of points.slice(1)) lines.push(`G1 ${point(p)} F${n(feed)}`);
         lines.push(`G0 Z${n(penUp)}`);

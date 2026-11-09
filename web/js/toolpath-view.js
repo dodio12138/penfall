@@ -8,14 +8,20 @@ let pathFrame = 0;
 function resetPathCamera() {
   Object.assign(pathCamera, { zoom: 1, x: 0, y: 0 });
 }
-/** World (mm) ↔ screen (CSS px) transform for the current camera. */
+/**
+ * World (work mm) ↔ screen (CSS px). Axes are flipped per the pen-origin directions so the page
+ * always appears upright (paper top at the top of the screen); grid labels still show work coordinates.
+ */
 function pathTransform(w, h, camera = pathCamera) {
+  const { dirX: sx, dirY: sy } = penOrigin();
   const b = toolpath.bounds;
-  const rangeX = Math.max(10, b.maxX - b.minX), rangeY = Math.max(10, b.maxY - b.minY);
+  const minX = sx > 0 ? b.minX : -b.maxX, maxX = sx > 0 ? b.maxX : -b.minX;
+  const minY = sy > 0 ? b.minY : -b.maxY, maxY = sy > 0 ? b.maxY : -b.minY;
+  const rangeX = Math.max(10, maxX - minX), rangeY = Math.max(10, maxY - minY);
   const scale = Math.max(.01, Math.min((w - 80) / rangeX, (h - 70) / rangeY)) * camera.zoom;
-  const ox = (w - rangeX * scale) / 2 - b.minX * scale + camera.x;
-  const oy = (h + rangeY * scale) / 2 + b.minY * scale + camera.y;
-  return { scale, ox, oy, toScreen: (p) => [ox + p.x * scale, oy - p.y * scale], toWorld: (sx, sy) => ({ x: (sx - ox) / scale, y: (oy - sy) / scale }) };
+  const ox = (w - rangeX * scale) / 2 - minX * scale + camera.x;
+  const oy = (h + rangeY * scale) / 2 + minY * scale + camera.y;
+  return { scale, sx, sy, toScreen: (p) => [ox + sx * p.x * scale, oy - sy * p.y * scale], toWorld: (px, py) => ({ x: sx * (px - ox) / scale, y: sy * (oy - py) / scale }) };
 }
 /** Zoom while keeping the world point under (sx, sy) fixed on screen. */
 function zoomPathAt(factor, sx, sy) {
@@ -39,31 +45,31 @@ function niceGridStep(target) {
   return ([1, 2, 5, 10].find((value) => value * base >= target) || 10) * base;
 }
 function drawGrid(ctx, view, w, h, color) {
-  const topLeft = view.toWorld(0, 0), bottomRight = view.toWorld(w, h);
+  const a = view.toWorld(0, 0), b = view.toWorld(w, h);
+  const [minX, maxX] = [Math.min(a.x, b.x), Math.max(a.x, b.x)], [minY, maxY] = [Math.min(a.y, b.y), Math.max(a.y, b.y)];
   const grid = niceGridStep(60 / view.scale);
   ctx.lineWidth = 1;
   ctx.font = '10px ui-monospace, monospace';
   ctx.fillStyle = color('--quiet');
-  for (let x = Math.floor(topLeft.x / grid) * grid; x <= bottomRight.x; x += grid) {
+  for (let x = Math.floor(minX / grid) * grid; x <= maxX; x += grid) {
     const [px] = view.toScreen({ x, y: 0 });
-    const axis = Math.abs(x) < grid / 1e6;
-    ctx.strokeStyle = axis ? '#ffffff26' : '#ffffff0d';
+    ctx.strokeStyle = Math.abs(x) < grid / 1e6 ? '#ffffff26' : '#ffffff0d';
     ctx.beginPath(); ctx.moveTo(Math.round(px) + .5, 0); ctx.lineTo(Math.round(px) + .5, h - 20); ctx.stroke();
     ctx.fillText(`${+x.toFixed(2)}`, px + 3, h - 7);
   }
-  for (let y = Math.floor(bottomRight.y / grid) * grid; y <= topLeft.y; y += grid) {
+  for (let y = Math.floor(minY / grid) * grid; y <= maxY; y += grid) {
     const [, py] = view.toScreen({ x: 0, y });
-    const axis = Math.abs(y) < grid / 1e6;
-    ctx.strokeStyle = axis ? '#ffffff26' : '#ffffff0d';
+    ctx.strokeStyle = Math.abs(y) < grid / 1e6 ? '#ffffff26' : '#ffffff0d';
     ctx.beginPath(); ctx.moveTo(0, Math.round(py) + .5); ctx.lineTo(w, Math.round(py) + .5); ctx.stroke();
     if (py > 12 && py < h - 24) ctx.fillText(`${+y.toFixed(2)}`, 4, py - 3);
   }
 }
-/** Generated programs use paper coordinates; draw the current paper as a faint reference. */
+/** Current paper (mapped through the pen origin) as a faint reference, plus the pen zero marker. */
 function drawPaper(ctx, view, color) {
   if (!layout.width || !layout.height) return;
-  const [x0, y0] = view.toScreen({ x: 0, y: layout.height });
-  const [x1, y1] = view.toScreen({ x: layout.width, y: 0 });
+  const corners = [[0, 0], [layout.width, layout.height]].map(([x, y]) => view.toScreen(paperToWork(x, y)));
+  const x0 = Math.min(corners[0][0], corners[1][0]), x1 = Math.max(corners[0][0], corners[1][0]);
+  const y0 = Math.min(corners[0][1], corners[1][1]), y1 = Math.max(corners[0][1], corners[1][1]);
   ctx.save();
   ctx.fillStyle = '#ffffff05';
   ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
@@ -73,6 +79,15 @@ function drawPaper(ctx, view, color) {
   ctx.setLineDash([]);
   ctx.fillStyle = color('--quiet');
   ctx.fillText(`${layout.paper.toUpperCase()} 纸张参考`, x0 + 5, Math.max(y0, 0) + 14);
+  // Pen zero: where the program expects the pen to start.
+  const [zx, zy] = view.toScreen({ x: 0, y: 0 });
+  ctx.strokeStyle = ctx.fillStyle = color('--accent');
+  ctx.lineWidth = 1.2;
+  ctx.beginPath(); ctx.arc(zx, zy, 6, 0, Math.PI * 2);
+  ctx.moveTo(zx, zy); ctx.lineTo(zx + view.sx * 18, zy); ctx.moveTo(zx, zy); ctx.lineTo(zx, zy - view.sy * 18); ctx.stroke();
+  ctx.fillText('X+', zx + view.sx * 21 - (view.sx < 0 ? 14 : 0), zy + 3);
+  ctx.fillText('Y+', zx - 6, zy - view.sy * 22 + (view.sy < 0 ? 8 : 0));
+  ctx.fillText('笔零点', zx + 9, zy + 16);
   ctx.restore();
 }
 function drawToolpath() {

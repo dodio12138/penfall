@@ -4,7 +4,7 @@ const LEGACY_PROGRAM_KEYS = { code: 'web-typewriter:gcode:v1', dirty: 'web-typew
 const SIM_TICK_MS = 50;
 const SIM_RAPID_FEED = 3000; // mm/min estimate for G0 travel moves.
 const codeEditor = $('#gcode');
-const motionInputs = ['feed', 'pen-up', 'pen-down'];
+const motionInputs = ['feed', 'pen-up', 'pen-down', 'origin-corner', 'origin-x', 'origin-y', 'x-dir', 'y-dir'];
 let toolpath = PathEngine.parse('');
 let programDirty = false;
 let parseTimer;
@@ -72,7 +72,7 @@ function generateProgram() {
   try {
     if (!settings.every((id) => validSetting(id, $(`#${id}`).value)) || !motionInputs.every((id) => $(`#${id}`).checkValidity() && $(`#${id}`).value !== '')) throw Error('请修正排版或笔轴参数。');
     const c = config();
-    const text = PathEngine.generate(content.value, { width: layout.width, height: layout.height, margin: +c.margin, size: +c['font-size'], gap: +c['letter-gap'], lineGap: +c['line-gap'], feed: +$('#feed').value, penUp: +$('#pen-up').value, penDown: +$('#pen-down').value });
+    const text = PathEngine.generate(content.value, { width: layout.width, height: layout.height, margin: +c.margin, size: +c['font-size'], gap: +c['letter-gap'], lineGap: +c['line-gap'], feed: +$('#feed').value, penUp: +$('#pen-up').value, penDown: +$('#pen-down').value, origin: penOrigin() });
     setProgram(text, 'gcode');
     log('已生成单线 G-code（毫米 / 绝对坐标 / Z 轴抬笔）。真实发送前必须核对设备兼容性。');
   } catch (error) {
@@ -168,7 +168,8 @@ codeEditor.addEventListener('scroll', () => { $('#gcode-lines').scrollTop = code
 for (const field of [content, ...settings.map((id) => $(`#${id}`)), ...motionInputs.map((id) => $(`#${id}`))]) {
   field.addEventListener('input', () => { resetSimulation(); markStale(); updateTask(); });
 }
-for (const id of motionInputs) $(`#${id}`).addEventListener('input', () => window.Workspace?.capture());
+for (const id of motionInputs) $(`#${id}`).addEventListener('input', () => { window.Workspace?.capture(); renderPreview(); drawToolpath(); });
+for (const id of ['machine-x', 'machine-y']) $(`#${id}`).addEventListener('input', updateOriginSummary);
 $('#start').addEventListener('click', startSimulation);
 $('#pause').addEventListener('click', () => {
   if (hardwareJob) return void bridgeAction(hardware.state === 'paused' ? 'resume' : 'pause');

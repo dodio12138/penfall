@@ -84,6 +84,9 @@ button.primary:hover:not(:disabled) { background: var(--accent-hover); }
 .settings-fields label { display: block; min-width: 0; margin-bottom: 13px; font-size: 12px; color: var(--muted); }
 .settings-fields :is(input, select, .ui-select) { margin-top: 6px; }
 .settings-fields .sidebar-note { margin: 0; }
+.field-heading { margin: 18px 0 10px; padding-top: 12px; border-top: 1px solid var(--border-subtle); font-size: 11px; font-weight: 600; color: var(--muted); }
+.origin-note { padding: 7px 9px; border-left: 2px solid var(--accent); background: var(--bg); color: var(--muted); }
+.field-hint { margin: 0 0 6px !important; font-size: 11px !important; line-height: 1.6 !important; color: var(--quiet) !important; }
 .field-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .device-name { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; padding: 0 14px; font-size: 12px; }
 .dot { width: 7px; height: 7px; border-radius: var(--radius); background: var(--quiet); flex-shrink: 0; }

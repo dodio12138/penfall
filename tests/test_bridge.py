@@ -108,6 +108,16 @@ class BridgeValidation(unittest.TestCase):
             bridge.validate_machine_path(['G1 X10'],coordinates,MACHINE)
 
 
+class PaperOriginLimits(unittest.TestCase):
+    def test_negative_paper_range_for_top_left_pen_zero(self):
+        limits=dict(xmin=-10,xmax=200,ymin=-289,ymax=8,zmin=0,zmax=10)
+        self.assertEqual(len(bridge.validate_job(['G21','G90','G0 X-5 Y-280','G1 X100 Y5 F500'],limits)),4)
+        with self.assertRaisesRegex(ValueError,'超出'):
+            bridge.validate_job(['G21','G90','G0 X0 Y-290'],limits)
+        with self.assertRaisesRegex(ValueError,'范围无效'):
+            bridge.validate_job(['G21','G90'],dict(limits,xmin=300))
+
+
 class BridgeHTTP(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
