@@ -233,3 +233,7 @@ node --test tests/*.test.js
 坐标交互回归为 `tests/coordinates.browser.cjs`（同样需要 Playwright）。在 1280 / 390px 下拦截全部 API，验证未知读数、显示切换不写设备、G54–G59 确认与真实响应读回、XY 设零保留 Z、忙时锁定、拒绝写入不更新、断网读数失效，以及带坐标令牌 / 机器行程的任务提交。只使用测试模拟器，不向 USB 发送测试命令。可设置 `SCREENSHOT_DIR` 保存坐标面板截图。
 
 浏览器设备流程使用模拟 / 假控制器测试，不能替代真机验收。真实设备状态只来自桥接应答；未查询显示「尚未查询」，通信异常显示状态未知。
+
+## 许可
+
+项目代码采用 [MIT 许可证](LICENSE)。附带的字库数据保留各自的许可：`web/glyphs/skeleton-kai.json` 为 SIL Open Font License 1.1（基于开源楷体字体的修改版本，见 `web/glyphs/SKELETON-KAI-NOTICE.txt`），`web/glyphs/hershey-*.json` 遵循 Hershey 字体的使用条款与致谢要求（见 `web/glyphs/HERSHEY-NOTICE.txt`）。
