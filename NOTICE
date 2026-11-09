@@ -1,0 +1,6 @@
+Penfall bundles third-party data that keeps its own license (see web/glyphs/):
+
+- web/glyphs/skeleton-kai.json — SIL Open Font License 1.1, modified version of
+  LXGW WenKai (SKELETON-KAI-NOTICE.txt, skeleton-kai.LICENSE.txt).
+- web/glyphs/hershey-*.json — Hershey fonts, use restriction and acknowledgements
+  in HERSHEY-NOTICE.txt.
