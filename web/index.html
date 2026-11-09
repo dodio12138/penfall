@@ -14,6 +14,7 @@
   <!-- Classic scripts share globals; order matters (see README「代码结构」). -->
   <script src="./js/common.js" defer></script>
   <script src="./js/glyphs.js" defer></script>
+  <script src="./js/brush.js" defer></script>
   <script src="./js/path-engine.js" defer></script>
   <script src="./js/drawing.js" defer></script>
   <script src="./js/templates.js" defer></script>
@@ -54,6 +55,14 @@
         <div class="field-row"><label title="字与字之间的距离随机变化">字距变化 / %<input id="natural-spacing" type="number" min="0" max="50" step="1" value="12" /></label><label title="相邻两个字偶尔不抬笔，直接连写">连笔概率 / %<input id="natural-join" type="number" min="0" max="50" step="1" value="0" /></label></div>
         <div class="field-row"><label title="整体倾斜，正值向右倾">倾斜 / °<input id="natural-slant" type="number" min="-20" max="20" step="0.5" value="0" /></label><label title="每个字倾斜角度的变化幅度">倾斜变化 / °<input id="natural-slant-var" type="number" min="0" max="10" step="0.5" value="3" /></label></div>
         <label>随机种子<input id="natural-seed" type="number" min="0" max="2147483647" step="1" value="1" /></label><button id="natural-reshuffle" type="button" class="wide-button">换一种笔迹</button></div></div></details>
+        <details class="pane" id="pane-brush"><summary><span class="pane-title">运笔</span><span class="pane-value" id="brush-state">关</span></summary><div class="pane-body"><label>运笔<select id="brush"><option value="off">关闭（匀速、匀力）</option><option value="on">开启（起笔、行笔、转折、收笔）</option></select></label>
+        <div id="brush-fields" hidden><label>笔的类型<select id="brush-pen"><option value="gel">中性笔 / 圆珠笔</option><option value="fountain">钢笔</option><option value="felt">软头笔 / 签字笔</option><option value="brush">毛笔 / 秀丽笔</option><option value="custom">自定义</option></select></label>
+        <div class="field-row"><label title="起笔区域长度，按字高的百分比">起笔 / %字高<input id="brush-entry" type="number" min="0" max="50" step="1" value="15" /></label><label title="收笔区域长度，按字高的百分比">收笔 / %字高<input id="brush-exit" type="number" min="0" max="50" step="1" value="18" /></label></div>
+        <div class="field-row"><label title="笔压随起笔、转折、收笔变化的强度">力度变化 / %<input id="brush-pressure" type="number" min="0" max="100" step="5" value="55" /></label><label id="brush-depth-label" title="最大笔压时，比落笔 Z 再往下压的深度。需要带弹簧的笔架">最大压深 / mm<input id="brush-depth" type="number" min="0" max="5" step="0.05" value="0.4" /></label></div>
+        <div class="field-row"><label title="起笔、收笔和转折处的最慢速度，占设定速度的百分比">最慢速度 / %<input id="brush-speed" type="number" min="20" max="100" step="5" value="60" /></label><label title="遇到折角时减速并加压（顿笔）的强度">转折顿笔 / %<input id="brush-corner" type="number" min="0" max="100" step="5" value="50" /></label></div>
+        <div class="field-row"><label title="起笔前的入锋和收笔时的回锋 / 出锋长度">入锋回锋 / %<input id="brush-hook" type="number" min="0" max="100" step="5" value="20" /></label><span></span></div>
+        <div class="field-row"><label title="笔压最轻时的线宽，占笔宽的百分比（只影响预览）">最细线宽 / %<input id="brush-width-min" type="number" min="10" max="100" step="5" value="75" /></label><label title="笔压最重时的线宽，占笔宽的百分比（只影响预览）">最粗线宽 / %<input id="brush-width-max" type="number" min="100" max="600" step="5" value="135" /></label></div>
+        <p class="pane-status" id="brush-note"></p></div></div></details>
         <details class="pane" id="pane-background"><summary><span class="pane-title">版式背景</span></summary><div class="pane-body"><div class="field-row"><label>背景<select id="bg-kind"><option value="none">无</option><option value="lines">横线</option><option value="four-line">英文四线三格</option><option value="grid">方格</option><option value="tianzige">田字格</option><option value="mizige">米字格</option><option value="composition">作文稿纸</option></select></label><label id="bg-cell-label">格子 / mm<input id="bg-cell" type="number" min="3" max="60" step="0.5" value="10" /></label></div>
         <div class="field-row"><label id="bg-gap-label">稿纸行间 / mm<input id="bg-gap" type="number" min="0" max="20" step="0.5" value="0" /></label><label>背景线<select id="bg-write"><option value="no">只用于预览</option><option value="yes">用笔画出</option></select></label></div>
         <label id="bg-pen-label">画背景用笔<select id="bg-pen"><option value="1">笔 1</option></select></label>
@@ -137,6 +146,7 @@
       <dt>稿件</dt><dd>同名的 .txt（正文）、.gcode（程序）和 .wtl（参数与格式）。模拟或发送前自动核对，正文变了就重新生成；手动改过的 G-code 不会被覆盖。</dd>
       <dt>纸面</dt><dd>「纸张」页可直接输入和排版；右键一个字选择写法；点公式可修改。</dd>
       <dt>拟真笔迹</dt><dd>「稿件设置 › 拟真笔迹」让每个字的大小、倾斜、基线和字距略有不同，并可偶尔连笔；同一随机种子结果完全相同。</dd>
+      <dt>运笔</dt><dd>「稿件设置 › 运笔」模仿起笔、行笔、转折、收笔：速度随笔画变化；Z 轴抬笔时还会边写边微调压深（需弹簧笔架）。先选笔的类型，再微调。</dd>
       <dt>抬笔方式</dt><dd>「稿件设置 › 笔与零点」选 Z 轴或舵机（M3 S / M5）。「机器 › 机型」可一次套用整套机器参数。</dd>
       <dt>快捷键</dt><dd>Ctrl/⌘ S 保存 · Ctrl/⌘ F 查找替换 · Ctrl/⌘ U 下划线 · Ctrl/⌘ Shift X 删除线 · Ctrl/⌘ . 上标 · Ctrl/⌘ , 下标 · F2 重命名 · Delete 删除 · 刀轨：滚轮缩放、拖动平移、双击复位</dd>
       <dt>安全</dt><dd>仅支持已确认的 GRBL 1.1（舵机抬笔需固件把主轴 PWM 接到舵机）。进度为控制器应答，不是实测位置；停止是软复位，不是急停。</dd>

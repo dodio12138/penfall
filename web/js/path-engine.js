@@ -2,6 +2,7 @@
 (function (root) {
   'use strict';
   const Glyphs = typeof module !== 'undefined' && module.exports ? require('./glyphs.js') : root.Glyphs;
+  const Brush = typeof module !== 'undefined' && module.exports ? require('./brush.js') : root.Brush;
   const defaultResolver = () => Glyphs.createResolver(Glyphs.DEFAULT_SELECTION, new Map([[Glyphs.BUILTIN_ID, Glyphs.builtinLibrary()]]));
   const WHITESPACE_ADVANCE = .7; // × font size, matches the built-in Latin advance.
   const MAX_PAGES = 99;
@@ -249,14 +250,20 @@
   /**
    * Pen strokes of a text layout in paper mm (top-down): glyphs (with 拟真 slant and 连笔), list numbers, formulas,
    * underlines / strike-through / bullets. Shared by the paper preview and the generator → [{ page, pen, points }].
-   * pen 0 = the draft's text pen.
+   * pen 0 = the draft's text pen. With brush (运笔, see brush.js), written strokes also get p (pressure) and f (speed).
    */
-  function textStrokes(result) {
+  function textStrokes(result, brush = null) {
+    const strokes = layoutStrokes(result);
+    const shape = Brush.normalize(brush);
+    if (!shape) return strokes;
+    return strokes.map((stroke) => stroke.size ? { page: stroke.page, pen: stroke.pen, ...Brush.shapeStroke(stroke.points, stroke.size, shape) } : stroke);
+  }
+  function layoutStrokes(result) {
     const strokes = [];
     let tail = null; // last stroke of the previous character, for 连笔
     for (const item of result.placements) {
       if (item.kind === 'formula') {
-        for (const points of item.box.strokes) strokes.push({ page: item.page, pen: item.pen || 0, points: points.map(([px, py]) => [item.x + px, item.y + py]) });
+        for (const points of item.box.strokes) strokes.push({ page: item.page, pen: item.pen || 0, size: item.size, points: points.map(([px, py]) => [item.x + px, item.y + py]) });
         tail = null;
         continue;
       }
@@ -264,7 +271,7 @@
       const k = item.size / item.glyph.unitsPerEm, tilt = item.tilt || 0;
       // Slant shears around the baseline (glyph bottom) so letters lean without leaving their row.
       const map = tilt ? ([u, v]) => [item.x + u * k + (item.size - v * k) * tilt, item.y + v * k] : ([u, v]) => [item.x + u * k, item.y + v * k];
-      const own = item.glyph.strokes.map((points) => ({ page: item.page, pen: item.pen || 0, points: points.map(map) }));
+      const own = item.glyph.strokes.map((points) => ({ page: item.page, pen: item.pen || 0, size: item.size, points: points.map(map) }));
       if (item.joinPrevious && tail && own.length) {
         const from = tail.points.at(-1), to = own[0].points[0];
         // Lift-free connection only for nearby strokes; a slight downward bow like a hand's 连笔.
@@ -396,19 +403,24 @@
     const servo = lift.mode !== 'z';
     const raise = servo ? [lift.mode === 'servo-m5' ? 'M5' : `M3 S${n(lift.up)}`, ...(lift.dwell ? [`G4 P${n(lift.dwell)}`] : [])] : [`G0 Z${n(lift.up)}`];
     const lower = servo ? [`M3 S${n(lift.down)}`, ...(lift.dwell ? [`G4 P${n(lift.dwell)}`] : [])] : [`G1 Z${n(lift.down)} F${n(Math.min(feed,300))}`];
-    const profile = servo ? `servo pen (M3 S${n(lift.down)} down, ${lift.mode === 'servo-m5' ? 'M5' : `M3 S${n(lift.up)}`} up)` : 'Z-axis pen';
+    // 运笔: pressure → extra Z depth (spring-loaded holder, Z only), speed → feed of each segment.
+    const brush = Brush.normalize(options.brush);
+    const depth = brush && !servo ? brush.depth : 0;
+    const zAt = (p) => n(lift.down - depth * p);
+    const profile = (servo ? `servo pen (M3 S${n(lift.down)} down, ${lift.mode === 'servo-m5' ? 'M5' : `M3 S${n(lift.up)}`} up)` : 'Z-axis pen') + (brush ? `, stroke dynamics${depth ? ` (press to Z${zAt(1)})` : ' (speed only)'}` : '');
     const lines = [`; Single-line text / ${profile} profile - review before use`,
       `; Pen zero at ${n(origin.x)} mm from paper left, ${n(origin.y)} mm from paper bottom; +X ${origin.dirX > 0 ? 'right' : 'left'}, +Y ${origin.dirY > 0 ? 'up' : 'down'}`,
       `; Page ${page} of ${pages}${pen === null ? '' : `; pen ${pen}`}`,
       'G21', 'G90', 'G17', ...raise, `G1 F${n(feed)}`];
     const toWork = (px, py) => `X${n(origin.dirX*(px-origin.x))} Y${n(origin.dirY*(height-py-origin.y))}`;
-    const stroke = (points) => {
-      lines.push(`G0 ${toWork(...points[0])}`, ...lower);
-      for (const p of points.slice(1)) lines.push(`G1 ${toWork(...p)} F${n(feed)}`);
+    const stroke = (points, pressure, speed) => {
+      lines.push(`G0 ${toWork(...points[0])}`);
+      if (pressure && depth) lines.push(`G1 Z${zAt(pressure[0])} F${n(Math.min(feed,300))}`); else lines.push(...lower);
+      points.slice(1).forEach((p, i) => lines.push(`G1 ${toWork(...p)}${pressure && depth ? ` Z${zAt(pressure[i + 1])}` : ''} F${speed ? Math.max(1, Math.round(feed * speed[i + 1])) : n(feed)}`));
       lines.push(...raise);
     };
     // Each character / formula / decoration is written with its own pen (formatting runs), else the text pen.
-    for (const item of textStrokes(result)) if (item.page === page && (pen === null || pen === (item.pen || textPen))) stroke(item.points);
+    for (const item of textStrokes(result, options.brush)) if (item.page === page && (pen === null || pen === (item.pen || textPen))) stroke(item.points, item.p, item.f);
     for (const points of orderPaths(drawings.filter((item) => item.page === page && (pen === null || item.pen === pen)).map((item) => item.points))) stroke(points);
     lines.push('; End - pen remains raised, no automatic homing');
     return lines.join('\n');

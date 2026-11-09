@@ -58,6 +58,7 @@
 - `text` / `gcode`：同一文件夹中的文件名（不能含路径）。重命名或移动稿件时三个文件一起改。
 - `settings` / `motion` / `glyphs`：生成 G-code 用到的全部参数（排版、笔轴、笔起点、页码、选字，见 [glyph-format.md](glyph-format.md)）。
 - `settings.natural`（`on` / `off`）及 `natural-size`、`natural-baseline`、`natural-spacing`、`natural-join`（%），`natural-slant`、`natural-slant-var`（°），`natural-seed`：拟真笔迹。同一种子的结果完全相同。
+- `settings.brush`（`on` / `off`）、`brush-pen`（`gel` / `fountain` / `felt` / `brush` / `custom`）及 `brush-entry`、`brush-exit`（% 字高）、`brush-pressure`、`brush-speed`、`brush-corner`、`brush-hook`（%）、`brush-depth`（mm）、`brush-width-min`、`brush-width-max`（% 笔宽，只影响预览）：运笔。
 - `motion.pen-mode`：`z`（Z 轴，用 `pen-up` / `pen-down`），`servo-m5`（`M3 S<servo-down>` 落笔，`M5` 抬笔），`servo-s`（`M3 S<servo-down>` / `M3 S<servo-up>`）；`pen-delay` 为舵机每次抬落笔后的 `G4 P` 等待秒数。
 - `drawing`（可选）：同一文件夹中的 `.svg` / `.dxf`，以及它在纸上的位置（`x` / `y` 为左上角距纸边 mm，`width` 为宽度 mm，`page` 为所在页）。图形文件的内容也计入梳串。
 - `style`（可选）：在纯文本之上的格式层。`runs` 是码点区间 `[from, to)` 的字号（mm）、用笔、`underline`、`strike`（`true`）和 `script`（`sup` / `sub`）；`paras` 是段落起点 `at` 的对齐（`center` / `right`）、首行缩进（mm）、行距倍数 `spacing`（1–3）和列表 `list`（`bullet` / `number`，连续的编号段落依次编号）。正文被编辑时，格式随文字平移。正文中的 `\( … \)` 是公式（LaTeX 写法）。格式也计入梳串。

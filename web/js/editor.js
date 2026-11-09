@@ -6,8 +6,12 @@ const content = $('#content');
 // 拟真笔迹 (natural handwriting) parameters live with the layout settings of the draft.
 const NATURAL_SETTINGS = ['natural', 'natural-size', 'natural-baseline', 'natural-spacing', 'natural-slant', 'natural-slant-var', 'natural-join', 'natural-seed'];
 const NATURAL_DEFAULTS = { natural: 'off', 'natural-size': '8', 'natural-baseline': '6', 'natural-spacing': '12', 'natural-slant': '0', 'natural-slant-var': '3', 'natural-join': '0', 'natural-seed': '1' };
-const settings = ['paper', 'orientation', 'font', 'font-size', 'line-gap', 'letter-gap', 'margin', 'gutter', 'bg-kind', 'bg-cell', 'bg-gap', 'bg-write', 'bg-pen', ...NATURAL_SETTINGS];
-const defaults = { paper: 'a4', orientation: 'portrait', font: 'serif', 'font-size': '5', 'line-gap': '3', 'letter-gap': '1', margin: '20', gutter: '0', 'bg-kind': 'none', 'bg-cell': '10', 'bg-gap': '0', 'bg-write': 'no', 'bg-pen': '1', ...NATURAL_DEFAULTS };
+// 运笔 (stroke dynamics, brush.js): pen type and its parameters; the pen type fills the fields below it.
+const BRUSH_FIELDS = { 'brush-entry': 'entry', 'brush-exit': 'exit', 'brush-pressure': 'pressure', 'brush-depth': 'depth', 'brush-speed': 'speed', 'brush-corner': 'corner', 'brush-hook': 'hook', 'brush-width-min': 'widthMin', 'brush-width-max': 'widthMax' };
+const BRUSH_SETTINGS = ['brush', 'brush-pen', ...Object.keys(BRUSH_FIELDS)];
+const BRUSH_DEFAULTS = { brush: 'off', 'brush-pen': 'fountain', ...Object.fromEntries(Object.entries(BRUSH_FIELDS).map(([id, key]) => [id, String(Brush.PENS.fountain[key])])) };
+const settings = ['paper', 'orientation', 'font', 'font-size', 'line-gap', 'letter-gap', 'margin', 'gutter', 'bg-kind', 'bg-cell', 'bg-gap', 'bg-write', 'bg-pen', ...NATURAL_SETTINGS, ...BRUSH_SETTINGS];
+const defaults = { paper: 'a4', orientation: 'portrait', font: 'serif', 'font-size': '5', 'line-gap': '3', 'letter-gap': '1', margin: '20', gutter: '0', 'bg-kind': 'none', 'bg-cell': '10', 'bg-gap': '0', 'bg-write': 'no', 'bg-pen': '1', ...NATURAL_DEFAULTS, ...BRUSH_DEFAULTS };
 const PAPER_SIZES = { a4: [210, 297], a5: [148, 210] };
 const PREVIEW_PX_PER_MM = 2.5;
 const ORIGIN_DEFAULTS = { 'origin-corner': 'bottom-left', 'origin-x': '0', 'origin-y': '0', 'x-dir': '1', 'y-dir': '1' };
@@ -164,6 +168,13 @@ function naturalOptions(c = config()) {
   const pct = (id) => Number(c[id]) / 100;
   return { size: pct('natural-size'), baseline: pct('natural-baseline'), spacing: pct('natural-spacing'), join: pct('natural-join'), slant: Number(c['natural-slant']), slantVar: Number(c['natural-slant-var']), seed: Number(c['natural-seed']) };
 }
+/** 运笔 options for PathEngine (percent / mm values as in the fields; brush.js normalizes), null when off. */
+function brushOptions(c = config()) {
+  if (c.brush !== 'on') return null;
+  return Object.fromEntries(Object.entries(BRUSH_FIELDS).map(([id, key]) => [key, Number(c[id])]));
+}
+/** Pressure only reaches the paper on a Z-axis pen (extra depth on a spring holder); servos get speed only. */
+const pressureWritten = () => $('#pen-mode').value === 'z' && Number(config()['brush-depth']) > 0;
 /**
  * Layout options shared by the paper preview and the generator (format, formulas, ruling, 拟真), so both place
  * every stroke identically. preview: use the glyph library being previewed in the 字形 panel.
@@ -177,7 +188,7 @@ function layoutOptions({ preview = false } = {}) {
   const gridPaper = PathEngine.GRID_BACKGROUNDS.includes(background.kind);
   const lined = ['lines', 'four-line'].includes(background.kind);
   const mathGlyph = mathGlyphFor({ preview });
-  return { format: textStyle, math: (source, mathSize) => MathLayout.layout(source, mathSize, mathGlyph), marker: mathGlyph, natural: naturalOptions(c), width, height, margin: Number(c.margin), gutter: Number(c.gutter), size, gap: Number(c['letter-gap']), lineGap: Number(c['line-gap']), grid: gridPaper ? { cell: background.cell, gap: background.kind === 'composition' ? background.gap : 0 } : null, pitch: lined ? Math.max(background.cell, size * (background.kind === 'four-line' ? 4 / 3 : 1)) : 0, background };
+  return { format: textStyle, math: (source, mathSize) => MathLayout.layout(source, mathSize, mathGlyph), marker: mathGlyph, natural: naturalOptions(c), brush: brushOptions(c), width, height, margin: Number(c.margin), gutter: Number(c.gutter), size, gap: Number(c['letter-gap']), lineGap: Number(c['line-gap']), grid: gridPaper ? { cell: background.cell, gap: background.kind === 'composition' ? background.gap : 0 } : null, pitch: lined ? Math.max(background.cell, size * (background.kind === 'four-line' ? 4 / 3 : 1)) : 0, background };
 }
 /** Same layout as the generator (PathEngine.layoutText); characters without a glyph use system-font widths. */
 function makeLayout() {
@@ -195,7 +206,7 @@ function makeLayout() {
   const pages = Math.max(result.pages, placement?.page || 1);
   // Ruling matches the text rows / cells; with 用笔画出 it is written like a drawing with its own pen.
   const ruling = PathEngine.backgroundPaths({ ...background, cell: lined ? options.pitch : background.cell }, options, pages);
-  return { width, height, margin: Number(c.margin), gutter: Number(c.gutter), size, font: c.font, paper: c.paper, orientation: c.orientation, placements: result.placements, glyphs: result.placements, strokes: PathEngine.textStrokes(result), carets: result.carets, formulaErrors: result.formulaErrors, paths, background: ruling, backgroundWritten: c['bg-write'] === 'yes' && ruling.length > 0, layoutOptions: options, missing: result.missing, overflow: result.overflow, pages };
+  return { width, height, margin: Number(c.margin), gutter: Number(c.gutter), size, font: c.font, paper: c.paper, orientation: c.orientation, placements: result.placements, glyphs: result.placements, strokes: PathEngine.textStrokes(result, options.brush), carets: result.carets, formulaErrors: result.formulaErrors, paths, background: ruling, backgroundWritten: c['bg-write'] === 'yes' && ruling.length > 0, layoutOptions: options, missing: result.missing, overflow: result.overflow, pages };
 }
 /** Pages included in the current writing set (all / odd / even), in order. */
 function pageSet() {
@@ -276,6 +287,29 @@ function updateLayoutInfo() {
   if (typeof updateBackgroundFields === 'function') updateBackgroundFields();
   if (typeof updatePenFields === 'function') updatePenFields();
   updateNaturalFields();
+  updateBrushFields();
+}
+/** 运笔: parameters shown only while on; depth only matters on a Z pen; the deepest Z must fit the Z range. */
+function updateBrushFields() {
+  const on = $('#brush').value === 'on', z = $('#pen-mode').value === 'z';
+  $('#brush-fields').hidden = !on;
+  $('#brush-state').textContent = on ? Brush.PENS[$('#brush-pen').value]?.name || '自定义' : '关';
+  $('#brush-depth-label').hidden = !z;
+  const deepest = Number($('#pen-down').value) - Number($('#brush-depth').value);
+  const low = Number($('#machine-z-min').value);
+  const note = $('#brush-note');
+  note.textContent = !on ? '' : z ? `最深落到 Z ${mm(deepest)} mm（落笔 Z 再压 ${mm(Number($('#brush-depth').value))} mm）。笔架需有弹簧；${deepest < low ? `「行程与安全」的 Z 下限 ${mm(low)} 高于此值，发送会被拒绝，请先核对并调低。` : 'Z 下限已覆盖此深度。'}` : '舵机抬笔无法边写边调笔压：只改变速度和起收笔轨迹。';
+  note.classList.toggle('warning', on && z && deepest < low);
+}
+/** Choosing a pen type fills its parameters; editing a parameter makes the type 自定义. */
+function applyBrushPen() {
+  const pen = Brush.PENS[$('#brush-pen').value];
+  if (!pen) return;
+  for (const [id, key] of Object.entries(BRUSH_FIELDS)) $(`#${id}`).value = String(pen[key]);
+}
+function brushFieldEdited() {
+  const select = $('#brush-pen'), pen = Brush.PENS[select.value];
+  if (pen && Object.entries(BRUSH_FIELDS).some(([id, key]) => Number($(`#${id}`).value) !== pen[key])) { select.value = 'custom'; select.dispatchEvent(new Event('input')); }
 }
 /** 拟真 parameters are shown only while it is on; the pane header shows the state. */
 function updateNaturalFields() {
@@ -333,9 +367,21 @@ function renderPreview() {
   const textPen = Number($('#text-pen').value) || 1;
   // Exactly the strokes the generator writes (拟真 variation, 连笔, list numbers, underlines…), in the real pen width.
   ctx.lineWidth = window.Workspace?.penWidth || .5;
+  // 运笔 with a Z pen: each segment as wide as its pressure makes the line (pen width × the pen type's range).
+  const brush = layout.layoutOptions.brush && pressureWritten() ? layout.layoutOptions.brush : null;
+  const penWidth = window.Workspace?.penWidth || .5;
   for (const stroke of layout.strokes || []) {
     if (stroke.page !== page) continue;
     ctx.strokeStyle = penColor(stroke.pen || textPen);
+    if (brush && stroke.p && stroke.points.length > 1) {
+      const shape = Brush.normalize(brush), wide = (p) => penWidth * Brush.width(shape, p);
+      for (let i = 1; i < stroke.points.length; i++) {
+        ctx.lineWidth = wide((stroke.p[i - 1] + stroke.p[i]) / 2);
+        ctx.beginPath(); ctx.moveTo(...stroke.points[i - 1]); ctx.lineTo(...stroke.points[i]); ctx.stroke();
+      }
+      ctx.lineWidth = penWidth;
+      continue;
+    }
     ctx.beginPath(); ctx.moveTo(...stroke.points[0]);
     if (stroke.points.length === 1) ctx.lineTo(stroke.points[0][0] + .01, stroke.points[0][1]);
     for (const point of stroke.points.slice(1)) ctx.lineTo(...point);
@@ -458,6 +504,10 @@ $('.view-tabs').addEventListener('keydown', (event) => {
 // Paper zoom: fits the page width by default (like a word processor); the choice is remembered on this device.
 try { const zoom = localStorage.getItem('penfall:paper-zoom'); if (zoom && [...$('#zoom').options].some((option) => option.value === zoom)) $('#zoom').value = zoom; } catch { /* optional */ }
 $('#natural').addEventListener('input', updateNaturalFields);
+// The pen type fills its fields first (capture phase), so the regular settings listener sees the new values.
+$('#brush-pen').addEventListener('input', applyBrushPen, true);
+for (const id of Object.keys(BRUSH_FIELDS)) $(`#${id}`).addEventListener('input', brushFieldEdited, true);
+for (const id of ['brush', 'brush-pen', 'brush-depth', 'pen-mode', 'pen-down', 'machine-z-min']) $(`#${id}`).addEventListener('input', updateBrushFields);
 // A new seed = another reproducible handwriting; it counts as a layout change (regenerates generated programs).
 $('#natural-reshuffle').addEventListener('click', () => {
   const field = $('#natural-seed');
