@@ -434,6 +434,13 @@ class Handler(SimpleHTTPRequestHandler):
                 raise ValueError('请求必须是对象')
             if self.path.startswith('/api/fs/'):
                 return self.files('POST', self.path[8:], data)
+            if self.path == '/api/jog/cancel':
+                # Realtime stop of a jog: never waits behind another request holding the control lock.
+                session = SESSION
+                if session is None:
+                    raise ValueError('未连接')
+                session.jog_cancel()
+                return self.reply(snapshot())
             with CONTROL_LOCK:
                 live = WORKER is not None and WORKER.is_alive()
                 if self.path == '/api/connect':
@@ -490,6 +497,11 @@ class Handler(SimpleHTTPRequestHandler):
                     action = self.path.rsplit('/', 1)[1]
                     SESSION.coordinate_action(action, data.get('expected'), target=data.get('wcs'), axes=data.get('axes'))
                     update(message='工件坐标系已读回确认' if action == 'wcs' else '纸张 X/Y 设零已读回确认')
+                elif self.path == '/api/jog':
+                    if SESSION is None or live:
+                        raise ValueError('未连接或有任务运行，不能点动')
+                    limits = data.get('limits') if isinstance(data.get('limits'), dict) else {}
+                    SESSION.jog(data.get('axis'), data.get('distance'), data.get('feed'), {key: limits[key] for key in limits if key in ('xmin', 'xmax', 'ymin', 'ymax', 'zmin', 'zmax')})
                 elif self.path == '/api/unlock':
                     if SESSION is None or live:
                         raise ValueError('未连接或有任务运行')

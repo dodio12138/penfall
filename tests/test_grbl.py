@@ -231,3 +231,44 @@ class AlarmUnlock(unittest.TestCase):
             self.session.unlock()
         self.assertNotIn(b'$X\n',self.board.writes)
 
+
+
+class Jogging(unittest.TestCase):
+    def setUp(self):
+        self.board=FakeGRBL()
+        self.session=Session(self.board)
+        self.session.refresh()
+        self.session.status()
+
+    def tearDown(self):
+        self.session.close()
+
+    def test_jog_sends_one_relative_block_and_moves(self):
+        target=self.session.jog('X',1.5,800)
+        self.assertEqual(target,[-98.5,-150,-5])
+        self.assertIn(b'$J=G91 G21 X1.500 F800\n',self.board.writes)
+        self.assertEqual(self.board.mpos[0],-98.5)
+        # Queued jogs build on the previous target, not on a stale report.
+        self.assertEqual(self.session.jog('X',1,800)[0],-97.5)
+
+    def test_jog_limits_and_validation(self):
+        limits=dict(xmin=-101,xmax=-99)
+        with self.assertRaisesRegex(ProtocolError,'超出机器行程'):
+            self.session.jog('X',5,800,limits)
+        with self.assertRaisesRegex(ProtocolError,'单次点动最多'):
+            self.session.jog('Y',20,800)
+        self.session.jog('Y',20,800,dict(ymin=-300,ymax=0))
+        for axis,distance,feed in [('A',1,100),('X',0,100),('X',101,100),('X',1,0),('X',float('nan'),100)]:
+            with self.subTest(axis=axis,distance=distance,feed=feed),self.assertRaises(ProtocolError):
+                self.session.jog(axis,distance,feed)
+        self.assertFalse(any(write.startswith(b'$J=G91 G21 A') for write in self.board.writes))
+
+    def test_jog_refused_in_alarm_or_unknown_position_and_cancel_is_realtime(self):
+        self.board.alarm(3)
+        deadline=time.monotonic()+2
+        while not self.session.fault and time.monotonic()<deadline: time.sleep(.01)
+        with self.assertRaises(ProtocolError):
+            self.session.jog('X',1,800)
+        self.session.jog_cancel()
+        self.assertEqual(self.board.writes[-1:],[b'\x85'])
+        self.assertFalse(any(write.startswith(b'$J') for write in self.board.writes))

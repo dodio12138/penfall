@@ -48,6 +48,11 @@ class FakeGRBL:
         if payload == b'?':
             self.emit(f'<{self.machine_state}|MPos:{self.raw(self.mpos)}'+(f'|WCO:{self.raw(self.wco())}' if self.include_wco else '')+'|FS:0,0>')
             return
+        if payload == b'\x85':
+            self.jog_cancels = getattr(self, 'jog_cancels', 0) + 1
+            if self.machine_state == 'Jog':
+                self.machine_state = 'Idle'
+            return
         if payload == b'!':
             self.machine_state='Hold:0'
             return
@@ -95,6 +100,16 @@ class FakeGRBL:
             for axis,number in re.findall(r'([XYZ])([+-]?[\d.]+)',code):
                 i='XYZ'.index(axis)
                 self.offsets[target][i]=self.mpos[i]-self.g92[i]-(self.tlo if i==2 else 0)-float(number)
+        elif code.startswith('$J='):
+            # Jog: relative mm move, applied at once (the emulator does not model motion time).
+            if not re.fullmatch(r'\$J=G91 G21 [XYZ][+-]?[\d.]+ F[\d.]+', code):
+                self.emit('error:3')
+                return
+            axis, number = re.search(r'([XYZ])([+-]?[\d.]+)', code[9:]).groups()
+            if abs(float(number)) > 200:
+                self.emit('error:15')
+                return
+            self.mpos['XYZ'.index(axis)] += float(number)
         elif re.match(r'^G[01](?:\s|$)',code):
             for axis,number in re.findall(r'([XYZ])([+-]?[\d.]+)',code):
                 i='XYZ'.index(axis)

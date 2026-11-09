@@ -14,3 +14,9 @@
 .coordinate-zero button { padding-inline: 3px; font-size: 11px; }
 .coordinate-fields .wide-button { width: 100%; margin: 10px 0 0; font-size: 12px; }
 #coordinate-reason { margin: 10px 0 0; color: var(--muted); font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
+
+/* 点动: XY cross with a stop button in the middle, Z on the right. */
+.jog-pad { display: grid; grid-template-columns: repeat(3, 1fr) 12px 1fr; grid-template-areas: ". yp . . zp" "xm stop xp . ." ". ym . . zm"; gap: 6px; margin: 4px 0 8px; }
+.jog-pad button { min-height: 40px; font-variant-numeric: tabular-nums; touch-action: none; user-select: none; }
+.jog-pad button.active { background: var(--selected); border-color: var(--accent); }
+#jog-stop { color: var(--danger); border-color: var(--danger); }

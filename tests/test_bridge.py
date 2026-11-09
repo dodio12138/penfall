@@ -270,6 +270,16 @@ class BridgeHTTP(unittest.TestCase):
             with self.assertRaises(urllib.error.HTTPError):self.request('/api/pause',{})
             self.assertEqual(bridge.STATE['state'],'complete')
 
+    def test_jog_and_cancel_endpoints(self):
+        with self.emulator() as (board,session):
+            session.status()
+            self.request('/api/jog',{'axis':'Y','distance':-2,'feed':600,'limits':{'ymin':-300,'ymax':0,'bogus':1}})
+            self.assertIn(b'$J=G91 G21 Y-2.000 F600\n',board.writes)
+            with self.assertRaises(urllib.error.HTTPError):
+                self.request('/api/jog',{'axis':'Y','distance':-500,'feed':600,'limits':{'ymin':-300,'ymax':0}})
+            self.request('/api/jog/cancel',{})
+            self.assertEqual(board.writes[-1:],[b'\x85'])
+
     def test_unlock_endpoint_requires_review_and_unlocks_an_alarm(self):
         with self.emulator() as (board,session):
             board.alarm(3)

@@ -198,6 +198,8 @@ class Session:
         self.alive = True
         self.fault = None
         self.expect_reset = False  # unlock() resets on purpose: the next banner is expected, not a fault
+        self.jog_target = None  # machine mm target of the last queued jog (successive jogs build on it)
+        self.jog_time = 0
         self.reader = threading.Thread(target=self._read, daemon=True)
         self.poller = threading.Thread(target=self._poll, daemon=True)
         self.reader.start()
@@ -400,6 +402,58 @@ class Session:
         finally:
             self.operation_kind = None
             self.operation.release()
+
+    JOG_UNLIMITED_MAX = 10  # mm per jog when no machine travel is known
+
+    def jog(self, axis, distance, feed, limits=None):
+        """Relative jog with GRBL's $J= (one block, modal state untouched, cancelable with 0x85).
+        limits: {'xmin':…, 'xmax':…} in machine mm for the axes that are known; the target must stay inside."""
+        if axis not in ('X', 'Y', 'Z'):
+            raise ProtocolError('只能点动 X / Y / Z')
+        if not (isinstance(distance, (int, float)) and math.isfinite(distance) and 0 < abs(distance) <= 100):
+            raise ProtocolError('点动距离必须在 0–100 mm')
+        if not (isinstance(feed, (int, float)) and math.isfinite(feed) and 0 < feed <= 10000):
+            raise ProtocolError('点动速度必须在 0–10000 mm/min')
+        index = 'XYZ'.index(axis)
+        low, high = (limits or {}).get(axis.lower() + 'min'), (limits or {}).get(axis.lower() + 'max')
+        bounded = all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in (low, high)) and low < high
+        if not bounded and abs(distance) > self.JOG_UNLIMITED_MAX:
+            raise ProtocolError(f'未填写 {axis} 轴机器行程，单次点动最多 {self.JOG_UNLIMITED_MAX} mm')
+        with self.condition:
+            if self.fault:
+                raise ProtocolError(self.fault)
+            data = self.model.snapshot()
+            state = (data['machineState'] or '').split(':')[0]
+            if state not in ('Idle', 'Jog'):
+                raise ProtocolError(f'控制器状态为 {state or "未知"}，不能点动')
+            if not data['fresh'] or data['mpos'] is None:
+                raise ProtocolError('位置未知或已过期，请先读取坐标')
+            # Jogs queue up: build on the last target while the previous ones may still be running.
+            recent = self.jog_target is not None and (state == 'Jog' or time.monotonic() - self.jog_time < 1)
+            target = list(self.jog_target if recent else data['mpos'])
+            target[index] = round(target[index] + distance, 6)
+            if bounded and not low - .0005 <= target[index] <= high + .0005:
+                raise ProtocolError(f'目标 {axis}={target[index]:.3f} 超出机器行程 [{low}, {high}]')
+        if not self.operation.acquire(timeout=.5):
+            raise ProtocolError('控制器正在同步或有任务，请稍后点动')
+        self.operation_kind = 'jog'
+        try:
+            try:
+                self.command(f'$J=G91 G21 {axis}{distance:.3f} F{feed:.0f}', timeout=2)
+            except ProtocolError as error:
+                if str(error) == 'error:15':
+                    raise ProtocolError('控制器拒绝：目标超出软限位行程') from None
+                raise
+            self.jog_target, self.jog_time = target, time.monotonic()
+            return target
+        finally:
+            self.operation_kind = None
+            self.operation.release()
+
+    def jog_cancel(self):
+        """Realtime jog cancel (0x85): stops the current jog and drops queued ones; harmless when idle."""
+        self.realtime(b'\x85')
+        self.jog_target = None
 
     def _poll(self):
         last_modal = time.monotonic()
