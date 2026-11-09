@@ -8,7 +8,7 @@
 
 ## 启动（含局域网 USB 桥接）
 
-USB 插在运行服务的电脑上。在项目目录运行：
+USB 插在运行服务的电脑上。在项目目录（`penfall/`）运行：
 
 ```sh
 python3 -m venv .venv

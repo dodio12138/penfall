@@ -144,7 +144,7 @@ const key = fs.readFileSync(path.join(__dirname, '../.bridge-key'), 'utf8').trim
     await page.locator('#conflict-reload').click();
     await accept();
     await page.waitForFunction(() => document.querySelector('#content').value === 'OTHER AGAIN');
-    assert(!await page.locator('#content').isDisabled());
+    await page.waitForFunction(() => !document.querySelector('#content').disabled); // editable again once the reload settles
     await other.close();
 
     // Backup / import an archive into a folder; plain TXT import becomes a draft; TXT export is exact.
