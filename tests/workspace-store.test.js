@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const {Store,KEY,normalize,ConflictError} = require('../workspace-store.js');
+const {Store,KEY,normalize,ConflictError} = require('../web/js/workspace-store.js');
 const sample = () => ({version:3,revision:'',documents:[{id:'a',name:'first.txt',title:'First',content:'正文',gcode:'G21\nG90',settings:{paper:'a4'},motion:{feed:'900'},programDirty:true,view:'gcode',updatedAt:'2026-01-01'}],openIds:['a'],activeId:'a'});
 const memory = () => { const values=new Map(); return {getItem:key=>values.has(key)?values.get(key):null,setItem:(key,value)=>values.set(key,value)}; };
 test('documents, settings, G-code, tabs, and dirty marker round-trip',()=>{

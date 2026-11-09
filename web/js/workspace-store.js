@@ -3,6 +3,13 @@
   const KEY = 'web-typewriter:projects:v3';
   const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
   class ConflictError extends Error {}
+  // Stored JSON always starts with version + revision (see normalize); read it without parsing megabytes.
+  const REVISION_PREFIX = /^\{"version":3,"revision":"([A-Za-z0-9-]*)"/;
+  function storedRevision(raw) {
+    if (raw === null) return '';
+    const match = REVISION_PREFIX.exec(raw.slice(0, 200));
+    return match ? match[1] : normalize(JSON.parse(raw)).revision;
+  }
   function normalize(data) {
     if (!data || data.version !== 3 || !Array.isArray(data.documents) || data.documents.length > 200) throw Error('不是有效的 v3 工作区备份，最多支持 200 份文稿。');
     const ids = new Set();
@@ -28,9 +35,7 @@
       return data;
     }
     write(data) {
-      const current = this.storage.getItem(KEY);
-      const revision = current === null ? '' : normalize(JSON.parse(current)).revision;
-      if (revision !== this.revision) throw new ConflictError('另一个页面已更新工作区。请先下载本页备份，再载入最新版本。');
+      if (storedRevision(this.storage.getItem(KEY)) !== this.revision) throw new ConflictError('另一个页面已更新工作区。请先下载本页备份，再载入最新版本。');
       const next = normalize(data);
       next.revision = uid();
       const encoded = JSON.stringify(next);

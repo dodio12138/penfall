@@ -132,24 +132,38 @@ TXT 下载为正文原文，不擅自添加标题；G-code 下载为当前代码
 
 多页面采用版本检查与 storage 事件检测冲突；发现其他页面更新后暂停本页编辑，需要先下载本页备份，再载入已保存版本。不支持多人实时协作。存储损坏时不会覆盖原库，救援备份会同时下载原始损坏数据。
 
+## 代码结构
+
+```
+server.py / grbl.py      USB 桥接（只对外提供 web/ 下的白名单静态文件）
+web/index.html           页面骨架
+web/css/                 base（变量与控件）· workspace · toolpath · coordinates
+web/js/common.js         公共工具：$、下载、文件名、行号、日志
+web/js/path-engine.js    单线字库生成与 G-code 解析（亦供 Node 测试）
+web/js/workspace-store.js  v3 工作区存储与校验（亦供 Node 测试）
+web/js/dialogs.js        页面内弹窗
+web/js/editor.js         正文编辑、纸张预览、视图切换、任务状态
+web/js/program.js        G-code 生成 / 导入 / 过期标记 / 模拟
+web/js/toolpath-view.js  刀轨画布：网格、纸张参考、平移、滚轮 / 双指缩放
+web/js/bridge.js         桥接 API、连接、轮询、硬件任务提交
+web/js/workspace.js      多文稿、标签、查找替换、尺寸调整
+web/js/coordinates.js    坐标定位面板
+web/js/ui.js             统一下拉组件与响应式行为
+```
+
+脚本为普通（非模块）脚本，共享全局变量，`index.html` 中的加载顺序即依赖顺序。
+
 ## 测试
 
 ```sh
-node --check app.js
-node --check motion.js
-node --check path-engine.js
-node --check workspace.js
-node --check workspace-store.js
-node --check ui.js
-node --check dialogs.js
-node --check coordinates.js
+for f in web/js/*.js; do node --check "$f"; done
 node --test tests/*.test.js
 .venv/bin/python -m unittest discover -s tests -p 'test_*.py'
 ```
 
 单元测试包含字形生成、中文拒绝、边界、相对 / 英寸 / 圆弧解析、工作区读写、坏数据保护、配额失败、版本冲突、严格硬件指令验证、模拟控制器应答 / 错误、单读线程与状态交错、分片报告、单位换算、WCO / G92 / TLO 一致性、过期 / 复位失效、G54–G59 切换及 X/Y 设零读回、迟到应答隔离、任务基准变化 / 暂停故障锁释放、机器行程变换、HTTP 密钥与跨来源限制。
 
-浏览器回归脚本为 `tests/workspace.browser.cjs`，需要在测试环境安装 Playwright 并启动 Web 服务。执行 `node tests/workspace.browser.cjs`；可设置 `TEST_URL`、`CHROME_PATH`（使用本机 Chrome）和 `SCREENSHOT`。测试使用独立浏览器上下文，不触碰日常浏览器数据。覆盖文稿 / G-code / 参数隔离、改名复制删除、筛选、查找替换、刷新恢复、备份合并、TXT 原文下载、关闭重开、缩放复位、尺寸调整及跨标签页冲突恢复。
+浏览器回归脚本为 `tests/workspace.browser.cjs`，需要在测试环境安装 Playwright 并启动 Web 服务。执行 `node tests/workspace.browser.cjs`（若 Playwright 浏览器版本不匹配，可设 `CHROME_PATH` 使用本机 Chrome）；可设置 `TEST_URL`、`CHROME_PATH`（使用本机 Chrome）和 `SCREENSHOT`。测试使用独立浏览器上下文，不触碰日常浏览器数据。覆盖文稿 / G-code / 参数隔离、改名复制删除、筛选、查找替换、刷新恢复、备份合并、TXT 原文下载、关闭重开、缩放复位、尺寸调整及跨标签页冲突恢复。
 
 响应式和下拉回归为 `tests/ui.browser.cjs`，同样使用 Playwright。覆盖 320、360、390、600、768、844、1024、1280、1920、2560px 宽度，包括手机横屏、四个工作分页、九文稿长名称、无顶部横向滚动条、键盘操作、弹窗内下拉边界、触屏长选项、禁用状态同步及纸张自适应。设置 `SCREENSHOT_DIR` 可保存各尺寸截图。测试是浏览器视口 / 触屏模拟，不代表已经实测所有型号手机或浏览器。
 

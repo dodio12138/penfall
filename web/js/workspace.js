@@ -22,6 +22,7 @@
     throw Error('无法生成唯一文稿名称。');
   }
 
+  const closeDrawerOnCompact = () => { if (innerWidth <= 900) document.body.classList.add('sidebar-hidden'); };
   function warn(message) {
     $('#workspace-warning').hidden = false;
     $('#workspace-warning-text').textContent = message;
@@ -162,7 +163,7 @@
     if (!data.openIds.includes(id)) data.openIds.push(id);
     if (view) active().view = view;
     applyDocument(); persist();
-    if (innerWidth <= 900) document.body.classList.add('sidebar-hidden');
+    closeDrawerOnCompact();
   }
   function closeDocument(id) {
     if (!canChange()) return;
@@ -179,14 +180,10 @@
     const doc = { id: uid(), name: uniqueName(name), title: '', content: '', gcode: '', settings: { ...defaults }, motion: { ...motionDefaults }, programDirty: false, view: 'editor', updatedAt: new Date().toISOString() };
     data.documents.push(doc); data.activeId = doc.id; data.openIds.push(doc.id);
     applyDocument(); persist(); showPanel('files');
-    if (innerWidth <= 900) document.body.classList.add('sidebar-hidden');
+    closeDrawerOnCompact();
     content.focus();
   }
-  function download(value, filename) {
-    const url = URL.createObjectURL(new Blob([value], { type: 'application/json;charset=utf-8' }));
-    const link = document.createElement('a'); link.href = url; link.download = filename;
-    document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
+  const download = (value, filename) => downloadText(value, filename, 'application/json');
   function backup() {
     capture();
     if (rawRecovery !== null) download(rawRecovery, 'damaged-workspace-original.json');
@@ -198,6 +195,7 @@
     if (reveal) document.body.classList.remove('sidebar-hidden');
     $('#sidebar-label').textContent = ({settings:'书写设置',coordinates:'坐标定位',files:'资源管理器'})[name];
     $('#explorer-section').hidden = name !== 'files';
+    $('#explorer-actions').hidden = name !== 'files';
     $('#coordinates-section').hidden = name !== 'coordinates';
     for (const id of ['settings-section','motion-section']) $(`#${id}`).hidden = name !== 'settings';
     document.querySelectorAll('[data-panel]').forEach(button => { const selected = button.dataset.panel === name; button.classList.toggle('active', selected); button.setAttribute('aria-pressed', String(selected)); });
@@ -211,6 +209,10 @@
     warn(`工作区读取失败：${error.message}。原数据未被覆盖，请先下载备份。`);
   }
   if (!data) {
+    // First run: migrate the pre-v3 single draft / program into the first document.
+    restoreLegacyDraft(); loadLegacyProgram();
+  }
+  if (!data) {
     const doc = { id: uid(), name: '未命名-1.txt', ...snapshot(), updatedAt: new Date().toISOString() };
     data = { version:3, revision:'', documents:[doc], openIds:[doc.id], activeId:doc.id };
   }
@@ -220,7 +222,11 @@
 
   document.querySelectorAll('[data-panel]').forEach(button => button.addEventListener('click', () => showPanel(button.dataset.panel)));
   $('#file-filter').addEventListener('input', () => { renderExplorer(); refreshLocks(); });
-  $('#document-switcher').addEventListener('change', event => openDocument(event.target.value));
+  $('#document-switcher').addEventListener('change', event => {
+    openDocument(event.target.value);
+    // A refused switch (locked / unsaved) must not leave the picker showing another document.
+    if (event.target.value !== (data.activeId || '')) { event.target.value = data.activeId || ''; event.target.dispatchEvent(new Event('input')); }
+  });
   $('#close-active-document').addEventListener('click', () => { if (data.activeId) closeDocument(data.activeId); });
   $('#new-document').addEventListener('click', createDocument);
   $('#welcome-new').addEventListener('click', createDocument);
@@ -281,7 +287,7 @@
       for (const doc of incoming) { doc.name = uniqueName(doc.name, null, reserved); reserved.push(doc.name); }
       data.documents.push(...incoming); data.activeId = incoming[0].id; data.openIds.push(incoming[0].id);
       applyDocument(); persist(); showPanel('files');
-      if (innerWidth <= 900) document.body.classList.add('sidebar-hidden');
+      closeDrawerOnCompact();
       log(`已导入 ${incoming.length} 份文稿；原工作区保留。`);
     } catch (error) { log(`导入失败：${error.message}`); warn(`导入失败：${error.message}`); }
   });
@@ -301,7 +307,6 @@
   window.addEventListener('beforeunload', event => {
     if (dirty || hardwareJob) { event.preventDefault(); event.returnValue = ''; }
   });
-  $('#generate-code').addEventListener('click', () => $('#generate').click());
   for (const event of ['click','keyup','select']) codeEditor.addEventListener(event, updateCursor);
 
   // Find/replace uses the actual active textarea and its selection, never a mock editor.
@@ -326,8 +331,7 @@
     matchIndex = (Math.max(0, matchIndex) + direction + matches.length) % matches.length;
     const start = matches[matchIndex];
     editor.setSelectionRange(start, start + $('#find-query').value.length);
-    editor.scrollTop = Math.max(0, (editor.value.slice(0,start).split('\n').length - 4) * 26);
-    (editor === content ? $('#line-numbers') : $('#gcode-lines')).scrollTop = editor.scrollTop;
+    scrollToLine(editor, editor.value.slice(0,start).split('\n').length, editor === content ? $('#line-numbers') : $('#gcode-lines'));
     $('#find-result').textContent = `${matchIndex + 1} / ${matches.length}`; updateCursor();
   }
   function openFind() {

@@ -164,6 +164,6 @@
   new MutationObserver(sidebarState).observe(document.body,{attributes:true,attributeFilter:['class']});sidebarState();
   document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!opened&&compact.matches&&!document.body.classList.contains('sidebar-hidden')&&!event.target.closest('dialog')){document.body.classList.add('sidebar-hidden');$('#sidebar-toggle').focus();}});
   // Collapse real log state on first compact load, rather than hiding an expanded panel with CSS.
-  if(innerWidth<=600||innerHeight<=500){$('#log').hidden=true;$('#log-resizer').hidden=true;$('#log-toggle').setAttribute('aria-expanded','false');$('#log-toggle').classList.remove('selected');}
-  new ResizeObserver(()=>{if(!$('#preview-view').hidden&&$('#zoom').value==='fit')renderPreview();}).observe($('.paper-stage'));
+  if(innerWidth<=600||innerHeight<=500)toggleLog(false);
+  new ResizeObserver(()=>{if(!$('#preview-view').hidden&&['fit','page'].includes($('#zoom').value))renderPreview();}).observe($('.paper-stage'));
 })();

@@ -5,6 +5,7 @@ import json
 import math
 import re
 import secrets
+import socket
 import threading
 import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -18,7 +19,21 @@ try:
 except ImportError:
     serial = None
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent / 'web'
+STATIC_TYPES = {'.html', '.css', '.js', '.svg', '.gcode', '.ico', '.png'}
+
+
+def static_assets(root=ROOT):
+    """Whitelist of public files: everything under web/ with a known type, no dotfiles."""
+    assets = {'/'}
+    for path in root.rglob('*'):
+        relative = path.relative_to(root)
+        if path.is_file() and path.suffix in STATIC_TYPES and not any(part.startswith('.') for part in relative.parts):
+            assets.add('/' + relative.as_posix())
+    return frozenset(assets)
+
+
+ASSETS = static_assets()
 TOKEN = secrets.token_urlsafe(24)
 SESSION = None
 WORKER = None
@@ -184,11 +199,20 @@ class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT), **kwargs)
 
+    def log_message(self, format, *args):
+        # Status polling runs several times per second; only log other requests and failures.
+        if self.path.startswith('/api/status') and len(args) > 1 and str(args[1]) == '200':
+            return
+        super().log_message(format, *args)
+
     def end_headers(self):
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('Referrer-Policy', 'same-origin')
         if self.path.startswith('/api/'):
             self.send_header('Cache-Control', 'no-store')
+        else:
+            # Always revalidate: a stale cached script mixed with new HTML breaks the shared globals.
+            self.send_header('Cache-Control', 'no-cache')
         super().end_headers()
 
     def reply(self, value, status=200):
@@ -209,10 +233,16 @@ class Handler(SimpleHTTPRequestHandler):
             return False
         return True
 
+    def do_HEAD(self):
+        # The base class would answer HEAD for any file under ROOT; apply the same whitelist.
+        if self.path.split('?', 1)[0] not in ASSETS:
+            self.send_error(404)
+            return
+        return super().do_HEAD()
+
     def do_GET(self):
         if not self.path.startswith('/api/'):
-            assets = ('/', '/index.html', '/style.css', '/motion.css', '/app.js', '/motion.js', '/path-engine.js', '/workspace.js', '/workspace-store.js', '/workspace.css', '/ui.js', '/dialogs.js', '/coordinates.js', '/coordinates.css', '/demo.gcode', '/favicon.ico')
-            if self.path.split('?', 1)[0] not in assets:
+            if self.path.split('?', 1)[0] not in ASSETS:
                 self.send_error(404)
                 return
             return super().do_GET()
@@ -364,9 +394,21 @@ if __name__ == '__main__':
     parser.add_argument('--host', default='127.0.0.1', help='局域网访问显式指定 0.0.0.0')
     parser.add_argument('--port', default=5173, type=int)
     args = parser.parse_args()
-    print(f'Web UI: http://{args.host}:{args.port}', flush=True)
+    print(f'Web UI: http://{"localhost" if args.host in ("127.0.0.1", "0.0.0.0") else args.host}:{args.port}', flush=True)
+    if args.host == '0.0.0.0':
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+                probe.connect(('192.0.2.1', 9))  # No packets are sent; only picks the LAN interface.
+                print(f'局域网访问: http://{probe.getsockname()[0]}:{args.port}', flush=True)
+        except OSError:
+            pass
     print(f'桥接访问密钥: {TOKEN}', flush=True)
     print('仅用于可信局域网；HTTP 不加密，不要映射到公网。', flush=True)
     if serial is None:
         print('未安装 pyserial，USB 接口暂不可用。', flush=True)
-    ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()
+    try:
+        ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()
+    except KeyboardInterrupt:
+        print('\n服务已停止。', flush=True)
+        if SESSION:
+            SESSION.close()

@@ -156,6 +156,21 @@ class BridgeHTTP(unittest.TestCase):
             with self.assertRaises(urllib.error.HTTPError) as result:urllib.request.urlopen(self.url+path)
             self.assertEqual(result.exception.code,404)
 
+    def test_web_assets_served_and_head_whitelisted(self):
+        for path in ['/','/index.html','/js/common.js','/js/program.js','/css/base.css','/favicon.svg','/demo.gcode']:
+            with urllib.request.urlopen(self.url+path) as response:
+                self.assertEqual(response.status,200,path)
+        for path in ['/server.py','/../server.py','/js/../../grbl.py']:
+            request=urllib.request.Request(self.url+path,method='HEAD')
+            with self.assertRaises(urllib.error.HTTPError) as result:urllib.request.urlopen(request)
+            self.assertEqual(result.exception.code,404)
+
+    def test_index_references_existing_assets(self):
+        html=(bridge.ROOT/'index.html').read_text(encoding='utf-8')
+        import re
+        for ref in re.findall(r'(?:src|href)="\./([^"#]+)"',html):
+            self.assertIn('/'+ref,bridge.ASSETS,ref)
+
     def test_coordinate_read_and_set_are_authoritative(self):
         with self.emulator() as (board,session):
             state=self.request('/api/coordinates/refresh',{})

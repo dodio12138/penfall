@@ -64,9 +64,16 @@ button.primary:hover:not(:disabled) { background: var(--accent-hover); }
 .activitybar { width: var(--activity-width); flex-shrink: 0; background: var(--surface-raised); display: flex; flex-direction: column; align-items: stretch; z-index: 30; }
 .activity { display: grid; place-items: center; height: 48px; border: 0; border-left: 2px solid transparent; border-radius: 0; background: transparent; padding: 0; color: var(--muted); }
 .activity .ui-icon { width: 22px; height: 22px; }
+.activity { position: relative; }
+.activity:hover:not(:disabled) { color: var(--text); background: transparent; }
 .activity.active { color: var(--text); border-left-color: var(--accent); background: var(--surface); }
+.activity-badge { position: absolute; right: 10px; bottom: 11px; width: 7px; height: 7px; border: 1px solid var(--surface-raised); background: var(--quiet); }
+#device-activity[data-state=connected] .activity-badge { background: var(--success); }
+#device-activity[data-state=warning] .activity-badge { background: var(--warning); }
 .activity-spacer { flex: 1; }
-.sidebar { width: var(--sidebar-width); max-width: 480px; flex-shrink: 0; background: var(--surface); overflow: auto; overflow-x: hidden; }
+.sidebar { width: var(--sidebar-width); max-width: 480px; flex-shrink: 0; display: flex; flex-direction: column; background: var(--surface); overflow: auto; overflow-x: hidden; }
+.sidebar > * { flex-shrink: 0; }
+.sidebar .device-card { margin: auto 0 0; padding-bottom: 14px; border-top: 1px solid var(--border-subtle); }
 .sidebar-heading { min-height: 48px; padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: 600; letter-spacing: .5px; }
 .sidebar-heading > div { display: flex; gap: 3px; }
 .sidebar-heading button { background: transparent; border-color: transparent; }
@@ -81,6 +88,7 @@ button.primary:hover:not(:disabled) { background: var(--accent-hover); }
 .device-name { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; padding: 0 14px; font-size: 12px; }
 .dot { width: 7px; height: 7px; border-radius: var(--radius); background: var(--quiet); flex-shrink: 0; }
 .dot.connected { background: var(--success); }
+.dot.warning { background: var(--warning); }
 .muted { color: var(--muted); }
 .wide-button { width: calc(100% - 28px); margin: 12px 14px 0; }
 .settings-fields .wide-button { width: 100%; margin: 12px 0 0; }
@@ -126,6 +134,7 @@ progress::-moz-progress-bar { background: var(--accent); }
 .statusbar { min-height: var(--footer-height); display: flex; align-items: center; gap: 16px; padding: 0 12px; padding-bottom: env(safe-area-inset-bottom, 0px); color: var(--muted); background: var(--surface); border-top: 1px solid var(--border-subtle); font-size: 10px; flex-shrink: 0; }
 .statusbar > span { white-space: nowrap; }
 #mode-status { color: var(--accent); }
+#mode-status.hardware { color: var(--warning); }
 .status-spacer { flex: 1; }
 #status { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 dialog { width: min(560px, calc(100vw - 24px)); max-width: calc(100vw - 24px); max-height: calc(100dvh - 24px); overflow: auto; padding: 22px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 16px 64px #0008; }

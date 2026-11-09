@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const { generate, parse } = require('../path-engine.js');
+const { generate, parse } = require('../web/js/path-engine.js');
 const options = { width:210,height:297,margin:20,size:5,gap:1,lineGap:3,feed:1200,penUp:5,penDown:0 };
 test('single-line text generates finite, bounded XY paths and raised final pen', () => {
   const result=parse(generate('Hello 123!',options));
@@ -18,7 +18,7 @@ test('overflow and invalid pen profiles rejected', () => {
   assert.throws(()=>generate('A',{...options,penUp:0}),/参数无效/);
 });
 test('square includes travel, writing, source lines and Z bounds', () => {
-  const result=parse(fs.readFileSync(require('node:path').join(__dirname,'../demo.gcode'),'utf8'));
+  const result=parse(fs.readFileSync(require('node:path').join(__dirname,'../web/demo.gcode'),'utf8'));
   assert.deepEqual(result.errors,[]);
   assert.equal(result.bounds.maxX,40);
   assert.equal(result.bounds.maxZ,5);
