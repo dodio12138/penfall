@@ -41,7 +41,9 @@ class BridgeValidation(unittest.TestCase):
         self.assertEqual(bridge.identify_grbl(quiet, .1, .1), '1.1f')
         self.assertEqual(quiet.sent, b'\r\n$I\n', 'only the read-only $I query')
         self.assertEqual(quiet.lines, [], 'the rest of the $I answer is dropped')
-        for board, reason in [(Board(), '没有任何回应'), (Board(['Grbl 0.9j']), '0.9j'), (Board(answers={b'$I': ['echo:Unknown command']}), 'Unknown command')]:
+        esp32 = Board(answers={b'$I': ['ok', 'ok', '[VER:1.3a.20221201:]', 'ok']})
+        self.assertEqual(bridge.identify_grbl(esp32, .1, .1), '1.3a', 'Grbl_Esp32 reports 1.3a and speaks the 1.1 protocol')
+        for board, reason in [(Board(), '没有任何回应'), (Board(['Grbl 0.9j']), '0.9j'), (Board(answers={b'$I': ['[VER:1.2b.20200101:]']}), '1.2b'), (Board(answers={b'$I': ['echo:Unknown command']}), 'Unknown command')]:
             with self.subTest(reason=reason), self.assertRaisesRegex(ValueError, reason):
                 bridge.identify_grbl(board, .1, .1)
 

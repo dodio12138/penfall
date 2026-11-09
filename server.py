@@ -11,7 +11,7 @@ import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
-from grbl import ProtocolError, Session
+from grbl import ProtocolError, Session, compatible, describe
 from workspace_fs import FsError, WorkspaceRoot
 
 try:
@@ -119,7 +119,7 @@ def identify_grbl(board, banner_wait=3, query_wait=2):
         # Let the rest of the $I answer ([OPT:...], ok) arrive, then drop it so it is not taken as a reply later.
         time.sleep(.3)
         board.reset_input_buffer()
-    if version and version.startswith('1.1'):
+    if compatible(version):
         return version
     received = ' / '.join(seen)[:160]
     garbled = received and sum(ch.isprintable() for ch in received) < .8 * len(received)
@@ -128,7 +128,7 @@ def identify_grbl(board, banner_wait=3, query_wait=2):
     elif garbled:
         hint = f'收到的是乱码（{received!r}），波特率很可能不对，请换一个波特率重试'
     elif version:
-        hint = f'控制器报告的是 GRBL {version}（收到：{received}），只支持 GRBL 1.1'
+        hint = f'控制器报告的是 GRBL {version}（收到：{received}），只支持 GRBL 1.1 和 Grbl_Esp32 1.3a'
     else:
         hint = f'收到：{received}。这不是 GRBL 1.1 的回应，可用 tools/serial_probe.py 识别固件'
     raise ValueError(f'未检测到标准 GRBL 1.1，拒绝连接。{hint}')
@@ -452,7 +452,7 @@ class Handler(SimpleHTTPRequestHandler):
                     try:
                         version = identify_grbl(board)
                         session = Session(board, version)
-                        message = 'GRBL 1.1 已连接'
+                        message = f'{describe(version)} 已连接'
                         try:
                             with session.reserve('sync'):
                                 session.refresh()

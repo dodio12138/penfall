@@ -13,6 +13,16 @@ class ProtocolError(RuntimeError):
     pass
 
 
+def compatible(version):
+    """GRBL 1.1, or Grbl_Esp32 1.3a (the ESP32 port: same status / $$ / $# / $G report formats as GRBL 1.1).
+    Other versions (0.9, unknown forks) are refused: the coordinate checks rely on these exact formats."""
+    return isinstance(version, str) and (version.startswith('1.1') or version == '1.3a')
+
+
+def describe(version):
+    return f'Grbl_Esp32 {version}（GRBL 1.1 协议）' if version == '1.3a' else f'GRBL {version}'
+
+
 def vector(text):
     try:
         values = [float(v) for v in text.split(',')]
@@ -132,14 +142,14 @@ class Coordinates:
         tlo = None if self.tlo is None or factor is None else round(self.tlo * factor, 6)
         consistent = mpos is not None and wpos is not None and wco is not None and all(abs(a-b-c) <= .02 for a,b,c in zip(mpos,wpos,wco))
         modal_fresh = self.modal_time is not None and now - self.modal_time <= 10
-        supported = self.version.startswith('1.1')
+        supported = compatible(self.version)
         parameters_known = self.wcs in offsets and g92 is not None and tlo is not None
         parameter_match = bool(parameters_known and wco is not None and all(abs(a - b - c - (tlo if i == 2 else 0)) <= .02 for i,(a,b,c) in enumerate(zip(wco,offsets[self.wcs],g92))))
         ready = bool(supported and fresh and consistent and modal_fresh and self.wcs and factor is not None and parameter_match)
         if self.fault:
             reason = self.fault
         elif not supported:
-            reason = '坐标操作仅支持已确认的标准 GRBL 1.1'
+            reason = '坐标操作仅支持已确认的 GRBL 1.1 / Grbl_Esp32 1.3a'
         elif not fresh:
             reason = '位置报告未知或已过期'
         elif factor is None:

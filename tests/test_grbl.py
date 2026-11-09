@@ -31,6 +31,18 @@ class CoordinateReports(unittest.TestCase):
         model.feed('<Idle|WPos:1,2,3>')
         self.assertEqual(model.snapshot()['mpos'],[-99,-148,-7])
 
+    def test_grbl_esp32_reports_are_accepted_other_versions_are_not(self):
+        # Grbl_Esp32 1.3a: GRBL 1.1 report formats plus [MSG:...] lines and extra status fields.
+        model=Coordinates('1.3a')
+        model.feed('[MSG:Grbl_ESP32 Ver 1.3a Date 20221201]')
+        populate(model)
+        model.feed('<Idle|MPos:-100,-150,-5|FS:0,0|Ov:100,100,100|WCO:-100,-150,-10>')
+        self.assertTrue(model.snapshot()['ready'])
+        for version in ('0.9j', '1.2b', '1.3b', ''):
+            other=Coordinates(version)
+            populate(other)
+            self.assertFalse(other.snapshot()['ready'], version)
+
     def test_unknown_offset_not_assumed_zero(self):
         model=Coordinates()
         model.feed('$13=0')
