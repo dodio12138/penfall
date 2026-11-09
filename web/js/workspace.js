@@ -42,7 +42,6 @@
     $('#save-indicator').textContent = text;
     $('#save-indicator').classList.toggle('unsaved', text !== '已保存');
     $('#save-indicator').title = conflict ? '文件已在其他地方修改，请选择载入或覆盖' : saveFailed ? `写入失败：${saveFailed}` : `${fsys?.label || ''}`;
-    $('#status').textContent = fsys ? `工作区：${fsys.label}` : '';
     for (const tab of $$('#document-tabs .document-tab')) {
       const doc = docs.get(tab.dataset.key);
       tab.classList.toggle('dirty', Boolean(doc && unsavedParts(doc).length));
@@ -272,10 +271,10 @@
   function refreshLocks() {
     const doc = active(), noDoc = !doc, locked = isLocked() || noDoc;
     const gcodeOnly = doc?.kind === 'gcode';
-    for (const id of ['content', 'title', 'gcode', 'generate', 'generate-code', 'import-gcode', 'load-demo', 'export', 'save-document', 'drawing-page', 'drawing-x', 'drawing-y', 'drawing-width', 'drawing-natural', 'drawing-fit', 'drawing-remove', 'drawing-add', ...settings, ...motionInputs]) $(`#${id}`).disabled = locked;
-    if (gcodeOnly) for (const id of ['content', 'generate', 'generate-code', 'export']) $(`#${id}`).disabled = true;
+    for (const id of ['content', 'title', 'gcode', 'generate-code', 'import-gcode', 'load-demo', 'export', 'save-document', 'drawing-page', 'drawing-x', 'drawing-y', 'drawing-width', 'drawing-natural', 'drawing-fit', 'drawing-remove', 'drawing-add', ...settings, ...motionInputs]) $(`#${id}`).disabled = locked;
+    if (gcodeOnly) for (const id of ['content', 'generate-code', 'export']) $(`#${id}`).disabled = true;
     const treeLocked = isLocked() || !fsys;
-    for (const id of ['new-document', 'new-from-template', 'welcome-template', 'apply-template', 'save-template', 'new-folder', 'import-document', 'rename-document', 'duplicate-document', 'delete-document', 'welcome-new', 'welcome-import', 'refresh-tree']) $(`#${id}`).disabled = treeLocked || (['rename-document', 'duplicate-document', 'delete-document'].includes(id) && !selectedPath);
+    for (const id of ['new-document', 'new-from-template', 'welcome-template', 'apply-template', 'save-template', 'new-folder', 'import-document', 'welcome-new', 'welcome-import', 'refresh-tree', 'backup-workspace']) $(`#${id}`).disabled = treeLocked;
     $('#pen-width').disabled = treeLocked;
     $('#workspace-switcher').disabled = isLocked();
     for (const button of $$('#document-tabs button')) button.disabled = hardwareJob || controllerBusy();
@@ -320,7 +319,6 @@
     $('#window-title').textContent = doc ? `${docLabel(doc)} — ${fsys?.name || ''}` : fsys?.name || '';
     const crumbs = doc ? [fsys?.name, ...Links.dirname(doc.key).split('/').filter(Boolean), docLabel(doc)] : [];
     $('#breadcrumbs').textContent = crumbs.join(' › ') + (doc?.kind === 'link' ? (currentView === 'gcode' || currentView === 'path' ? ` › ${Links.basename(doc.paths.gcode)}` : ` › ${Links.basename(doc.paths.text)}`) : '');
-    $('#language-status').textContent = currentView === 'gcode' ? 'G-code' : currentView === 'path' ? 'XY 刀轨' : currentView === 'preview' ? '纸张排版' : '纯文本';
     $('#cursor').hidden = !doc || !['editor', 'gcode'].includes(currentView);
     if (doc) updateCursor();
     $('.main-area').classList.toggle('no-document', !doc);
@@ -875,7 +873,7 @@
       applyDrawing(doc);
       layout = makeLayout(); renderPreview(); markStale(); scheduleRegenerate(); updateTask();
       capture();
-      log(`已为稿件添加图形 ${stem}${ext}。可在「书写设置 › 图形」调整位置与大小。`);
+      log(`已为稿件添加图形 ${stem}${ext}。可在「稿件设置 › 图形」调整位置与大小。`);
     });
   });
   $('#drawing-remove').addEventListener('click', async () => {
@@ -1164,17 +1162,20 @@
   function showPanel(name, reveal = true) {
     panel = name;
     if (reveal) document.body.classList.remove('sidebar-hidden');
-    $('#sidebar-label').textContent = ({ settings: '书写设置', coordinates: '坐标定位', files: '资源管理器', glyphs: '字形' })[name];
-    $('#explorer-section').hidden = name !== 'files';
+    $('#sidebar-label').textContent = ({ files: '资源管理器', settings: '稿件设置', glyphs: '字形', machine: '机器' })[name];
     $('#explorer-actions').hidden = name !== 'files';
-    $('#coordinates-section').hidden = name !== 'coordinates';
-    $('#glyphs-section').hidden = name !== 'glyphs';
+    for (const id of ['files', 'settings', 'glyphs', 'machine']) $(`#${id === 'files' ? 'explorer' : id}-section`).hidden = name !== id;
     if (name === 'glyphs') renderGlyphPanel();
-    for (const id of ['settings-section', 'motion-section']) $(`#${id}`).hidden = name !== 'settings';
     $$('[data-panel]').forEach((button) => { const selected = button.dataset.panel === name; button.classList.toggle('active', selected); button.setAttribute('aria-pressed', String(selected)); });
   }
+  /** Open a sidebar panel and, optionally, one of its sections (e.g. the machine panel's safety section). */
+  function reveal(name, paneId) {
+    showPanel(name);
+    const section = paneId && $(`#${paneId}`);
+    if (section) { section.open = true; section.scrollIntoView({ block: 'nearest' }); }
+  }
   window.Workspace = {
-    capture, refreshLocks, syncBeforeRun,
+    capture, refreshLocks, syncBeforeRun, reveal,
     save: async () => { capture(); if (await flushAll()) log('工作区已保存。'); },
     get activeId() { return activeKey; },
     get activeName() { const doc = active(); return doc ? (doc.kind === 'link' ? `${Links.stem(doc.key)}.txt` : Links.basename(doc.key)) : ''; },
@@ -1202,9 +1203,6 @@
   $('#welcome-import').addEventListener('click', () => importInto(''));
   $('#refresh-tree').addEventListener('click', () => refreshTree());
   $('#collapse-tree').addEventListener('click', () => { expanded.clear(); persistUiState(); renderTree(); });
-  $('#rename-document').addEventListener('click', () => renameNode(nodeByPath.get(selectedPath)));
-  $('#duplicate-document').addEventListener('click', () => duplicateNode(nodeByPath.get(selectedPath)));
-  $('#delete-document').addEventListener('click', () => deleteNode(nodeByPath.get(selectedPath)));
   $('#document-file').addEventListener('change', (event) => {
     const files = [...event.target.files];
     const folder = event.target.dataset.folder || '';

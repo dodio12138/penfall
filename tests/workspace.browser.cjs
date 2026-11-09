@@ -150,6 +150,7 @@ const key = fs.readFileSync(path.join(__dirname, '../.bridge-key'), 'utf8').trim
     // Backup / import an archive into a folder; plain TXT import becomes a draft; TXT export is exact.
     await saved();
     let download = page.waitForEvent('download');
+    await page.locator('#explorer-more').click();
     await page.locator('#backup-workspace').click();
     const backup = await download;
     const archive = JSON.parse(fs.readFileSync(await backup.path(), 'utf8'));
@@ -165,13 +166,15 @@ const key = fs.readFileSync(path.join(__dirname, '../.bridge-key'), 'utf8').trim
     await page.locator('#document-file').setInputFiles({ name: 'imported.txt', mimeType: 'text/plain', buffer: body });
     await page.waitForFunction(() => document.querySelector('#content').value.startsWith('Imported exact'));
     download = page.waitForEvent('download');
+    await page.locator('#editor-more').click();
     await page.locator('#export').click();
     const txt = await download;
     assert.equal(txt.suggestedFilename(), 'imported.txt');
     assert.equal(fs.readFileSync(await txt.path(), 'utf8'), body.toString());
 
     // Pen width is a workspace setting used by the paper and the toolpath.
-    await page.locator('[data-panel=settings]').click();
+    await page.locator('[data-panel=machine]').click();
+    await page.evaluate(() => { document.querySelector('#pane-pens').open = true; });
     await page.locator('#pen-width').fill('1.2');
     await page.locator('[data-panel=files]').click();
     await page.locator('#path-tab').click();

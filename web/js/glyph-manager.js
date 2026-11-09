@@ -263,7 +263,7 @@ function renderGlyphPreferences(locked, chars) {
     row.append(choices);
     rows.push(row);
   }
-  if (!rows.length) rows.push(element('p', 'sidebar-note', '正文中没有多种写法可选的字。导入含多个变体的字库后，可在这里为每个字选默认写法。'));
+  if (!rows.length) rows.push(element('p', 'pane-empty', '正文中没有可选多种写法的字'));
   list.replaceChildren(...rows);
 }
 function renderGlyphPanel() {
@@ -281,9 +281,10 @@ function renderGlyphPanel() {
   const missing = chars.filter((char) => !glyphCandidates(char).length);
   const coverage = $('#glyph-coverage');
   coverage.classList.toggle('warning', missing.length > 0);
-  coverage.textContent = !chars.length ? '正文为空。' : missing.length
-    ? `正文 ${chars.length} 个不同字符，缺 ${missing.length} 个：${missing.slice(0, 40).join(' ')}${missing.length > 40 ? ' …' : ''}。缺字无法生成 G-code，纸张页以红色系统字体示意。`
-    : `正文 ${chars.length} 个不同字符，已全部由启用的字库覆盖。`;
+  coverage.textContent = !chars.length ? '' : missing.length
+    ? `缺 ${missing.length} 个字：${missing.slice(0, 40).join(' ')}${missing.length > 40 ? ' …' : ''}`
+    : `全部覆盖（${chars.length} 个不同的字）`;
+  coverage.hidden = !chars.length;
   renderGlyphPreferences(locked, chars);
   $('#glyph-pin-count').textContent = `逐字指定 ${glyphSelection.pins.length} 处`;
   $('#glyph-clear-pins').disabled = locked || !glyphSelection.pins.length;

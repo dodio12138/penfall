@@ -46,7 +46,7 @@ const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
         throw Error(`Unexpected endpoint ${path}`);
       });
       await page.goto(url);
-      await page.locator('[data-panel=coordinates]').click();
+      await page.locator('[data-panel=machine]').click();
       assert.equal(await page.locator('#position-x').textContent(),'—');
       assert(await page.locator('#zero-xy').isDisabled());
       if(width<=900)await page.locator('#sidebar-backdrop').click({position:{x:width-52,y:20}});
@@ -56,8 +56,7 @@ const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
       await page.locator('#protocol-confirm').check();
       await page.locator('#serial-connect').click();
       await page.waitForFunction(()=>document.querySelector('#device-status').textContent.startsWith('已连接'));
-      await page.locator('#connection-dialog .dialog-heading button').click();
-      await page.locator('[data-panel=coordinates]').click();
+      await page.locator('[data-panel=machine]').click();
       assert.equal(await page.locator('#position-x').textContent(),'10.000');
       assert.equal(await page.locator('#position-z').textContent(),'5.000');
       await page.locator('#frame-machine').click();
@@ -96,16 +95,17 @@ const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
       // Sending requires a real current coordinate token and explicitly entered machine bounds.
       if(width<=900)await page.locator('#sidebar-backdrop').click({position:{x:width-52,y:20}});
       await page.locator('#device-activity').click();
+      await page.evaluate(()=>document.querySelectorAll('details.pane').forEach(d=>{d.open=true;}));
       for(const [axis,low,high] of [['x',-300,0],['y',-300,0],['z',-30,0]])for(const [bound,value] of [['min',low],['max',high]])await page.locator(`#travel-${axis}-${bound}`).fill(String(value));
       await page.locator('#safety-confirm').check();
-      await page.locator('#connection-dialog .dialog-heading button').click();
+      if(width<=900)await page.locator('#sidebar-backdrop').click({position:{x:width-52,y:20}});
       await page.evaluate(()=>{document.querySelector('#gcode').value='G21\nG90\nG0 Z5\nG0 X10 Y10\nG1 X20 Y20 F500';parseProgram();selectView('gcode');});
       await page.locator('#send-job').click();await page.locator('#action-accept').click();
       await page.waitForFunction(()=>document.querySelector('#task-state').textContent==='设备已 Idle');
       assert.equal(requests.filter(r=>r.path==='/api/job').length,1);
       assert(!requests.some(r=>r.path==='/api/home'||r.body?.axes?.includes('Z')));
       assert.deepEqual(errors,[]);
-      if(process.env.SCREENSHOT_DIR){await page.locator('[data-panel=coordinates]').click();await page.screenshot({path:`${process.env.SCREENSHOT_DIR}/coordinates-${width}.png`});}
+      if(process.env.SCREENSHOT_DIR){await page.locator('[data-panel=machine]').click();await page.screenshot({path:`${process.env.SCREENSHOT_DIR}/coordinates-${width}.png`});}
       console.log(`Coordinates ${width}px: unknown/read-only display, real-source updates, WCS confirmation/readback, XY zero, Z preservation, busy locks, rejected writes, network loss and bound job submission passed (API emulator only).`);
       await context.close();
     }

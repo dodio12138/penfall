@@ -27,6 +27,7 @@ const dxf = ['0','SECTION','2','HEADER','9','$INSUNITS','70','4','0','ENDSEC','0
     };
     const code = () => page.locator('#gcode').inputValue();
     await page.goto(url);
+      await page.evaluate(()=>document.querySelectorAll('details.pane').forEach(d=>{d.open=true;}));
     await page.locator('#content:not([disabled])').waitFor();
 
     // SVG import → a draft with the drawing; scripts / handlers never run.
@@ -61,6 +62,7 @@ const dxf = ['0','SECTION','2','HEADER','9','$INSUNITS','70','4','0','ENDSEC','0
     assert.equal(await page.locator('#drawing-x').inputValue(), '20');
 
     // Pen rack: recolouring a pen changes which pen a colour maps to.
+    await page.locator('[data-panel=machine]').click(); // pen rack = machine setting of the workspace
     await page.locator('#pen-list .pen-row').nth(1).locator('input[type=color]').evaluate((input) => { input.value = '#00aa00'; input.dispatchEvent(new Event('change', { bubbles: true })); });
     await page.waitForFunction(() => !layout.paths.some((path) => path.pen === 2));
     await page.locator('#add-pen').click();

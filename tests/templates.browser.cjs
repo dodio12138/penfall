@@ -20,6 +20,7 @@ const url = process.env.TEST_URL || 'http://127.0.0.1:5173';
         await page.locator('#template-dialog').waitFor({ state: 'hidden' });
       };
       await page.goto(url);
+      await page.evaluate(()=>document.querySelectorAll('details.pane').forEach(d=>{d.open=true;}));
       await page.locator('#content:not([disabled])').waitFor();
       // New from a built-in grid template: settings, starter text, one character per cell.
       await sidebar('files');

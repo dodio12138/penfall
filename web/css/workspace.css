@@ -1,4 +1,3 @@
-#backup-workspace { margin-left: auto; font-size: 11px; white-space: nowrap; }
 .sidebar h2 span { padding: 0 6px; border-radius: var(--radius); background: var(--control); color: var(--muted); font-size: 10px; }
 #file-filter { display: block; width: calc(100% - 24px); margin: 0 12px 10px; font-size: 12px; }
 .file-item { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 34px; padding: 7px 14px; text-align: left; border: 0; border-radius: 0; background: transparent; font-size: 12px; }
@@ -6,11 +5,6 @@
 .file-icon { flex-shrink: 0; color: var(--muted); font: 10px ui-monospace, monospace; }
 .document-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .code-child { display: block; padding-left: 38px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11px ui-monospace, monospace; }
-.document-actions { display: flex; gap: 6px; padding: 12px; flex-wrap: wrap; }
-.document-actions button { font-size: 11px; padding-inline: 8px; }
-#delete-document { color: var(--danger); }
-#device-status { width: 100%; padding-left: 14px; overflow-wrap: anywhere; font-size: 11px; }
-#connection-note { margin-bottom: 0; }
 #sidebar-resizer { width: 4px; flex-shrink: 0; background: var(--border-subtle); cursor: col-resize; touch-action: none; }
 body.sidebar-hidden #sidebar-resizer { display: none; }
 #log-resizer { height: 4px; flex-shrink: 0; background: var(--border-subtle); cursor: row-resize; touch-action: none; }
@@ -26,8 +20,6 @@ body.sidebar-hidden #sidebar-resizer { display: none; }
 .close-document { width: 30px; min-width: 30px; color: var(--muted); padding: 2px; font-size: 18px; }
 .tabbar-space { display: none; }
 .tabbar > button { min-height: 30px; flex-shrink: 0; font-size: 11px; padding: 4px 8px; background: transparent; border-color: transparent; }
-#save-indicator { flex-shrink: 0; color: var(--success); font-size: 10px; white-space: nowrap; }
-#save-indicator.unsaved { color: var(--warning); }
 .document-picker { display: none; min-width: 0; flex: 0 1 180px; }
 #close-active-document { display: none; }
 .tabbar.has-tab-overflow .document-picker { display: flex; }
@@ -55,7 +47,6 @@ body.sidebar-hidden #sidebar-resizer { display: none; }
   .document-picker { display: flex; flex: 1; }
   #close-active-document { display: inline-flex; align-items: center; justify-content: center; width: 28px; padding: 0; font-size: 18px; }
   .tabbar { padding: 5px 8px; gap: 5px; }
-  #save-document { display: none; }
   .editor-toolbar { padding: 6px 10px; min-height: 44px; }
   .view-tabs { gap: 2px; padding: 2px; }
   .view-tabs button { padding: 4px 3px; gap: 4px; font-size: 12px; }
@@ -76,8 +67,6 @@ body.sidebar-hidden #sidebar-resizer { display: none; }
 }
 @container workbench (max-width: 300px) {
   .view-tabs .ui-icon { display: none; }
-  #save-indicator { font-size: 9px; }
-  #export { padding-inline: 4px; }
   .preview-bottom { align-items: flex-start; }
 }
 @media (max-width: 1100px) {
@@ -94,9 +83,8 @@ body.sidebar-hidden #sidebar-resizer { display: none; }
   .titlebar { padding-inline: 7px; gap: 7px; }
   .title-context { display: none; }
   .titlebar strong { font-size: 12px; }
-  #backup-workspace { font-size: 11px; padding-inline: 7px; }
   .statusbar { gap: 10px; padding-inline: 9px; }
-  #status, #cursor, #encoding-status { display: none; }
+  #cursor { display: none; }
   #mode-status { max-width: 145px; overflow: hidden; text-overflow: ellipsis; }
   dialog { padding: 16px; }
   .connection-option { padding: 11px; }
@@ -139,7 +127,6 @@ body.sidebar-hidden #sidebar-resizer { display: none; }
 .tree-row:hover .tree-more, .tree-row.selected .tree-more { visibility: visible; }
 @media (hover: none) { .tree-row { min-height: 34px; } .tree-row.selected .tree-more { visibility: visible; } }
 .tree-empty { margin: 10px 14px; }
-.tree-hint { margin-top: 0; }
 .context-menu { position: fixed; z-index: 160; min-width: 170px; padding: 4px; background: var(--surface-raised); border: 1px solid var(--border); box-shadow: 0 10px 32px #0008; }
 .context-menu button { display: block; width: 100%; min-height: 28px; padding: 4px 12px; text-align: left; font-size: 12px; background: transparent; border-color: transparent; }
 .context-menu button:hover:not(:disabled), .context-menu button:focus-visible { background: var(--selected); outline: none; }

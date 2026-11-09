@@ -19,10 +19,10 @@ const library={format:'web-typewriter/glyph-library',version:1,id:'test-hand',na
       const closePanel=async()=>{ if(width<=900)await page.locator('#sidebar-backdrop').click({position:{x:width-80,y:20}}); };
       await page.locator('#content').fill('龘龘龘 AB');
       await openPanel();
-      assert.match(await page.locator('#glyph-coverage').textContent(),/缺 1 个：龘/);
+      assert.match(await page.locator('#glyph-coverage').textContent(),/缺 1 个字：龘/);
       await page.locator('#glyph-file').setInputFiles({name:'hand.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(library))});
       await page.waitForFunction(()=>document.querySelector('#glyph-libraries .glyph-library')?.textContent.includes('测试手写'));
-      assert.match(await page.locator('#glyph-coverage').textContent(),/全部由启用的字库覆盖/);
+      assert.match(await page.locator('#glyph-coverage').textContent(),/全部覆盖/);
       // Strategy cycle: three occurrences use a, b, c.
       await page.locator('[data-select-id=glyph-strategy]').click();
       await page.getByRole('option',{name:'依次轮换'}).click();
@@ -66,7 +66,7 @@ const library={format:'web-typewriter/glyph-library',version:1,id:'test-hand',na
       await page.locator('#content').type('𪚥'); // not in any library
       await page.waitForFunction(()=>document.querySelector('#code-state').textContent.includes('无法自动更新'));
       await page.locator('#preview-tab').click();
-      assert.match(await page.locator('#layout-status').textContent(),/缺字 1 个/);
+      assert.match(await page.locator('#paper-mode').textContent(),/缺字 1 个/);
       await page.locator('#edit-tab').click();
       await page.locator('#content').press('Backspace');
       // Persistence: selection in the workspace, library in IndexedDB.

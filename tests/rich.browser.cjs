@@ -38,6 +38,7 @@ const docx = zip({
     const errors = [];
     page.on('pageerror', (error) => errors.push(error.message));
     await page.goto(url);
+      await page.evaluate(()=>document.querySelectorAll('details.pane').forEach(d=>{d.open=true;}));
     await page.locator('#content:not([disabled])').waitFor();
     // Type directly on the paper.
     await page.locator('#preview-tab').click();

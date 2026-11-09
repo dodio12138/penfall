@@ -144,7 +144,7 @@
     tabsFrame=requestAnimationFrame(()=>{
       const bar=$('.tabbar'),tabs=$('#document-tabs');
       const intrinsic=[...tabs.children].reduce((width,tab)=>width+tab.getBoundingClientRect().width,0);
-      const actions=['save-document','save-indicator','export'].reduce((width,id)=>width+$(`#${id}`).getBoundingClientRect().width,0)+36;
+      const actions=40;
       bar.classList.toggle('has-tab-overflow',intrinsic>bar.clientWidth-actions);
       const selected=tabs.querySelector('.active');
       if(selected&&tabs.clientWidth){const left=selected.offsetLeft-tabs.offsetLeft;if(left<tabs.scrollLeft)tabs.scrollLeft=left;else if(left+selected.offsetWidth>tabs.scrollLeft+tabs.clientWidth)tabs.scrollLeft=left+selected.offsetWidth-tabs.clientWidth;}
@@ -165,5 +165,42 @@
   document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!opened&&compact.matches&&!document.body.classList.contains('sidebar-hidden')&&!event.target.closest('dialog')){document.body.classList.add('sidebar-hidden');$('#sidebar-toggle').focus();}});
   // Collapse real log state on first compact load, rather than hiding an expanded panel with CSS.
   if(innerWidth<=600||innerHeight<=500)toggleLog(false);
+  // Menus behind "⋯" buttons (aria-haspopup=menu): one open at a time, keyboard navigable.
+  let openMenuButton=null;
+  function closePopup(focus=false){
+    if(!openMenuButton)return;
+    const menu=$(`#${openMenuButton.getAttribute('aria-controls')}`);
+    menu.hidden=true;openMenuButton.setAttribute('aria-expanded','false');
+    if(focus)openMenuButton.focus();
+    openMenuButton=null;
+  }
+  for(const button of $$('[aria-haspopup=menu]')){
+    const menu=$(`#${button.getAttribute('aria-controls')}`);
+    button.addEventListener('click',()=>{
+      if(openMenuButton===button){closePopup();return;}
+      closePopup();
+      menu.hidden=false;button.setAttribute('aria-expanded','true');openMenuButton=button;
+      const rect=button.getBoundingClientRect(),width=menu.offsetWidth;
+      menu.style.left=`${Math.max(4,Math.min(innerWidth-width-4,rect.right-width))}px`;
+      menu.style.top=`${Math.min(innerHeight-menu.offsetHeight-4,rect.bottom+2)}px`;
+      menu.querySelector('[role=menuitem]:not(:disabled)')?.focus();
+    });
+    menu.addEventListener('click',event=>{if(event.target.closest('[role=menuitem]'))closePopup();});
+    menu.addEventListener('keydown',event=>{
+      const items=[...menu.querySelectorAll('[role=menuitem]:not(:disabled)')],index=items.indexOf(document.activeElement);
+      if(['ArrowDown','ArrowUp'].includes(event.key)){event.preventDefault();items[(index+(event.key==='ArrowDown'?1:-1)+items.length)%items.length]?.focus();}
+      if(event.key==='Escape'||event.key==='Tab'){event.preventDefault();closePopup(true);}
+    });
+  }
+  document.addEventListener('pointerdown',event=>{if(openMenuButton&&!openMenuButton.contains(event.target)&&!$(`#${openMenuButton.getAttribute('aria-controls')}`).contains(event.target))closePopup();},true);
+  window.addEventListener('resize',()=>closePopup());
+  // Collapsible sidebar sections remember whether they are open.
+  const PANES='web-typewriter:panes';
+  let paneState={};
+  try{paneState=JSON.parse(localStorage.getItem(PANES)||'{}');}catch{/* defaults */}
+  for(const pane of $$('details.pane')){
+    if(pane.id in paneState)pane.open=paneState[pane.id];
+    pane.addEventListener('toggle',()=>{paneState[pane.id]=pane.open;try{localStorage.setItem(PANES,JSON.stringify(paneState));}catch{/* optional */}});
+  }
   new ResizeObserver(()=>{if(!$('#preview-view').hidden&&['fit','page'].includes($('#zoom').value))renderPreview();}).observe($('.paper-stage'));
 })();

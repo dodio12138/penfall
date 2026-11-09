@@ -163,7 +163,6 @@ async function startSimulation() {
   simulation.timer = setInterval(() => { if (simulation.state === 'running') stepSimulation(cursor); }, SIM_TICK_MS);
 }
 
-$('#generate').addEventListener('click', () => generateProgram());
 $('#generate-code').addEventListener('click', () => generateProgram());
 $('#path-regenerate').addEventListener('click', () => generateProgram('path'));
 $('#load-demo').addEventListener('click', async () => {

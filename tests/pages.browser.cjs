@@ -10,6 +10,7 @@ const url=process.env.TEST_URL||'http://127.0.0.1:5173';
       const context=await browser.newContext({viewport:{width,height:844},acceptDownloads:true}),page=await context.newPage(),errors=[];
       page.on('pageerror',error=>errors.push(error.message));
       await page.goto(url);
+      await page.evaluate(()=>document.querySelectorAll('details.pane').forEach(d=>{d.open=true;}));
       await page.locator('#content').fill('HELLO WORLD\n'.repeat(80));
       await page.locator('#preview-tab').click();
       const pager=page.locator('#preview-view .pager');
@@ -24,6 +25,7 @@ const url=process.env.TEST_URL||'http://127.0.0.1:5173';
       await page.waitForFunction(()=>document.querySelector('#gcode').value.includes('; Page 2 of 3'));
       assert.match(await page.locator('#code-state').textContent(),/第 2 \/ 3 页/);
       const download=page.waitForEvent('download');
+      await page.locator('#editor-more').click();
       await page.locator('#download-gcode').click();
       assert.match((await download).suggestedFilename(),/-p2\.gcode$/);
       // Odd / even writing sets: the pager steps inside the set; the gutter mirrors.
@@ -70,7 +72,7 @@ const url=process.env.TEST_URL||'http://127.0.0.1:5173';
       await page.locator('.glyph-library').filter({hasText:'Hershey 手写体'}).getByRole('button',{name:/提高优先级/}).click();
       await page.waitForFunction(()=>document.querySelector('.glyph-library')?.textContent.includes('Hershey 手写体')&&!document.querySelector('.glyph-library').textContent.includes('加载中'));
       await page.waitForFunction(()=>document.querySelector('#gcode').value.split('\n').length>200);
-      assert.match(await page.locator('#glyph-coverage').textContent(),/全部由启用的字库覆盖/);
+      assert.match(await page.locator('#glyph-coverage').textContent(),/全部覆盖/);
       // Live font preview: 👁 shows the paper in another library without changing the document.
       const before=await page.locator('#gcode').inputValue();
       const roman=page.locator('.glyph-library').filter({hasText:'Hershey 罗马'});

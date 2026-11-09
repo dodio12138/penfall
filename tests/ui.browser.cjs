@@ -32,7 +32,7 @@ async function bounds(page,selector) {
       if(width<=900) assert(await page.locator('#sidebar-backdrop').isHidden());
       await page.locator('[data-panel=files]').click();
       const originalTitle=await page.title();
-      await page.locator('#rename-document').click();
+      await page.locator('#file-tree .tree-row.selected').focus();await page.keyboard.press('F2');
       await page.locator('#action-dialog').waitFor({state:'visible'});
       assert((await bounds(page,'#action-dialog')).inside);
       await assertSquareUI(page);
@@ -75,13 +75,13 @@ async function bounds(page,selector) {
       assert.equal(await page.locator('#paper').inputValue(),'a5');
       await paper.focus();await page.keyboard.press('ArrowUp');await page.keyboard.press('Enter');
       assert.equal(await page.locator('#paper').inputValue(),'a4');
-      const font=page.locator('[data-select-id=font]');
+      const font=page.locator('[data-select-id=orientation]');
       await font.click();await page.keyboard.press('Escape');assert.equal(await font.getAttribute('aria-expanded'),'false');
       assert(await page.locator('#settings-section').isVisible()); // Escape closed the menu, not the drawer.
       if(width<=900) await page.locator('#sidebar-backdrop').click({position:{x:width-52,y:20}});
       await page.locator('#preview-tab').click();
       assert(await page.locator('.paper-stage').evaluate(el=>el.scrollWidth<=el.clientWidth),`${width}: default paper preview scrolls horizontally`);
-      await page.locator('[data-panel=coordinates]').click();
+      await page.locator('[data-panel=machine]').click();
       assert.equal(await page.locator('#position-x').textContent(),'—');
       assert(await page.locator('#zero-xy').isDisabled());
       assert(await page.locator('[data-select-id=coordinate-wcs]').isDisabled());
@@ -94,7 +94,7 @@ async function bounds(page,selector) {
       await assertSquareUI(page);
       await page.getByRole('option',{name:'57600',exact:true}).click();assert.equal(await page.locator('#baud').inputValue(),'57600');
       await baud.click();await page.keyboard.press('Tab');assert.equal(await page.locator('.select-menu').count(),0);
-      await page.locator('#connection-dialog .dialog-heading button').click();
+      if(width<=900) await page.locator('#sidebar-backdrop').click({position:{x:width-52,y:20}});
       assert.equal(await page.locator('.select-menu').count(),0);
       const enhanced=await page.evaluate(()=>document.querySelectorAll('select').length===document.querySelectorAll('.select-trigger').length);
       assert(enhanced);

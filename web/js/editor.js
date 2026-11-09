@@ -48,9 +48,9 @@ function updateOriginSummary() {
   const origin = penOrigin();
   const area = paperWorkBounds(layout.width, layout.height, origin);
   const horizontal = origin.corner.endsWith('right') ? '右边' : '左边', vertical = origin.corner.startsWith('top') ? '上边' : '下边';
-  $('#origin-summary').textContent = `零点在纸张${CORNER_NAMES[origin.corner]}：距${horizontal} ${mm(origin.dx)} mm、距${vertical} ${mm(origin.dy)} mm。纸张对应工件坐标 X ${mm(area.xmin)}…${mm(area.xmax)} · Y ${mm(area.ymin)}…${mm(area.ymax)}。把笔移到此点后，在「坐标定位」中 XY 置零。`;
+  $('#origin-summary').textContent = `零点：${CORNER_NAMES[origin.corner]}，距${horizontal} ${mm(origin.dx)}、距${vertical} ${mm(origin.dy)} mm · 纸张 X ${mm(area.xmin)}…${mm(area.xmax)}，Y ${mm(area.ymin)}…${mm(area.ymax)}`;
   const dialogArea = paperWorkBounds(Number($('#machine-x').value) || 0, Number($('#machine-y').value) || 0, origin);
-  $('#paper-range-hint').textContent = `按「笔起点」换算后校验：X ${mm(dialogArea.xmin)}…${mm(dialogArea.xmax)} · Y ${mm(dialogArea.ymin)}…${mm(dialogArea.ymax)} mm（工件坐标）。`;
+  $('#paper-range-hint').textContent = `工件坐标 X ${mm(dialogArea.xmin)}…${mm(dialogArea.xmax)}，Y ${mm(dialogArea.ymin)}…${mm(dialogArea.ymax)} mm`;
 }
 /** Paper preview marker: pen zero with +X / +Y arrows, drawn in top-down paper mm. */
 function drawOriginMarker(ctx) {
@@ -228,7 +228,6 @@ function announceNextPage() {
 function updateLayoutInfo() {
   $('#paper-info').textContent = `${layout.paper.toUpperCase()} · ${layout.orientation === 'landscape' ? '横向' : '纵向'} · ${layout.width} × ${layout.height} mm`;
   const notes = [];
-  if (layout.missing?.length) notes.push(`缺字 ${layout.missing.length} 个（红色为系统字体示意，不能生成）`);
   if (layout.overflow) notes.push(`内容超过 ${PathEngine.MAX_PAGES} 页上限，请拆分文稿`);
   else if (layout.pages > 1) notes.push(`共 ${layout.pages} 页，每页单独生成与书写，换纸后再发送下一页`);
   if (drawingState?.error) notes.push(`图形无法解析：${drawingState.error}`);
@@ -237,7 +236,10 @@ function updateLayoutInfo() {
   legend.replaceChildren(...usedPens(currentPage()).map((pen) => { const chip = document.createElement('span'); chip.className = 'pen-chip'; chip.style.setProperty('--pen', penColor(pen)); chip.textContent = penName(pen); return chip; }));
   legend.hidden = usedPens().length < 2;
   $('#layout-status').textContent = notes.join('；');
-  $('#paper-mode').textContent = glyphPreview && glyphLibraries.has(glyphPreview) ? `字库预览：${glyphCatalog.get(glyphPreview)?.name}（未应用）` : layout.missing?.length ? '单线笔迹 + 缺字示意' : '单线笔迹预览';
+  // Shown only when the paper differs from what will be written (font preview, missing glyphs).
+  const warning = glyphPreview && glyphLibraries.has(glyphPreview) ? `字库预览：${glyphCatalog.get(glyphPreview)?.name}（未应用）` : layout.missing?.length ? `缺字 ${layout.missing.length} 个（红色示意）` : '';
+  $('#paper-mode').textContent = warning;
+  $('#paper-mode').hidden = !warning;
   updatePagers();
   updateOriginSummary();
   if (typeof updatePenPicker === 'function') updatePenPicker();
@@ -384,8 +386,9 @@ function selectView(view, { focus = true } = {}) {
   if (focus && view === 'editor' && !content.disabled) content.focus();
   window.dispatchEvent(new CustomEvent('workspace-view', { detail: view }));
 }
-function openConnection() {
-  if (!$('#connection-dialog').open) $('#connection-dialog').showModal();
+/** Machine panel (connection, position, pens, limits); optionally a specific section. */
+function openConnection(paneId = 'pane-connection') {
+  window.Workspace?.reveal('machine', paneId);
 }
 function toggleLog(show = $('#log').hidden) {
   $('#log').hidden = !show;
@@ -421,7 +424,7 @@ for (const pager of $$('.pager')) {
 }
 $('#sidebar-toggle').addEventListener('click', () => document.body.classList.toggle('sidebar-hidden'));
 if (window.innerWidth <= 900) document.body.classList.add('sidebar-hidden');
-['#connect', '#device-activity'].forEach((id) => $(id).addEventListener('click', openConnection));
+$('#machine-status').addEventListener('click', () => openConnection());
 $('#help').addEventListener('click', () => $('#help-dialog').showModal());
 $('#clear-log').addEventListener('click', () => $('#log').replaceChildren());
 $('#log-toggle').addEventListener('click', () => toggleLog());
