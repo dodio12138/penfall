@@ -89,3 +89,19 @@ test('drawing paths are placed on their page, filtered by pen, and ordered to re
   const ordered=require('../web/js/path-engine.js').orderPaths([[[10,0],[0,0]],[[11,0],[20,0]]]);
   assert.deepEqual(ordered,[[[0,0],[10,0]],[[11,0],[20,0]]]); // first path reversed to start near the origin
 });
+
+test('grid paper: one character per cell, centred; background ruling matches the cells', () => {
+  const { backgroundPaths } = require('../web/js/path-engine.js');
+  const grid = { cell: 10, gap: 0 };
+  const layout = layoutText('HI\nAB', { ...options, size: 5, grid });
+  assert.deepEqual(layout.placements.map((item) => [item.char, item.x, item.y]), [['H', 23.25, 22.5], ['I', 33.25, 22.5], ['A', 23.25, 32.5], ['B', 33.25, 32.5]]);
+  const ruling = backgroundPaths({ kind: 'tianzige', cell: 10 }, options, 1);
+  const verticals = ruling.filter((path) => !path.dashed && path.points[0][0] === path.points[1][0]);
+  assert.equal(new Set(verticals.map((path) => path.points[0][0])).size, 18); // 17 columns fit in 170 mm
+  assert(ruling.some((path) => path.dashed));
+  const lined = backgroundPaths({ kind: 'lines', cell: 9 }, options, 1);
+  const pitched = layoutText('A\nB', { ...options, pitch: 9 });
+  assert.equal(pitched.placements[1].y - pitched.placements[0].y, 9);
+  assert.equal(lined[0].points[0][1], 20 + 5 + .6); // line just under the first row
+  assert.deepEqual(backgroundPaths({ kind: 'none' }, options, 3), []);
+});

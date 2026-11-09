@@ -7,7 +7,7 @@
   const MIGRATED_KEY = 'web-typewriter:migrated-to-files';
   const SAVE_DELAY = 300;
   const motionDefaults = { feed: '1200', 'pen-up': '5', 'pen-down': '0', page: '1', 'page-set': 'all', 'text-pen': '1', pen: 'all', ...ORIGIN_DEFAULTS };
-  const TYPE_LABEL = { '.txt': 'TXT', '.md': 'MD', '.gcode': 'GC', '.nc': 'NC', '.tap': 'TAP', '.wtw': 'WS', '.wtl': '稿' };
+  const TYPE_LABEL = { '.txt': 'TXT', '.md': 'MD', '.gcode': 'GC', '.nc': 'NC', '.tap': 'TAP', '.wtw': 'WS', '.wtl': '稿', '.wtt': '模', '.svg': 'SVG', '.dxf': 'DXF' };
 
   let fsys = null;
   let manifest = Links.normalizeManifest();
@@ -203,6 +203,7 @@
   }
   async function openPath(path, view) {
     if (path === Links.MANIFEST) { showPanel('settings'); $('#pen-width').focus(); return; } // machine settings of this workspace
+    if (Links.extname(path) === '.wtt') return createFromTemplate(Links.dirname(path), path);
     if (Links.DRAWING_TYPES.includes(Links.extname(path)) && !known.has(Links.join(Links.dirname(path), `${Links.stem(path)}.wtl`))) return wrapDrawing(path);
     const target = Links.documentFor(path, known);
     if (!target) { log(`${Links.basename(path)} 不是可在编辑器中打开的文件。`); return; }
@@ -271,7 +272,7 @@
     for (const id of ['content', 'title', 'gcode', 'generate', 'generate-code', 'import-gcode', 'load-demo', 'export', 'save-document', 'drawing-page', 'drawing-x', 'drawing-y', 'drawing-width', 'drawing-natural', 'drawing-fit', 'drawing-remove', 'drawing-add', ...settings, ...motionInputs]) $(`#${id}`).disabled = locked;
     if (gcodeOnly) for (const id of ['content', 'generate', 'generate-code', 'export']) $(`#${id}`).disabled = true;
     const treeLocked = isLocked() || !fsys;
-    for (const id of ['new-document', 'new-folder', 'import-document', 'rename-document', 'duplicate-document', 'delete-document', 'welcome-new', 'welcome-import', 'refresh-tree']) $(`#${id}`).disabled = treeLocked || (['rename-document', 'duplicate-document', 'delete-document'].includes(id) && !selectedPath);
+    for (const id of ['new-document', 'new-from-template', 'welcome-template', 'apply-template', 'save-template', 'new-folder', 'import-document', 'rename-document', 'duplicate-document', 'delete-document', 'welcome-new', 'welcome-import', 'refresh-tree']) $(`#${id}`).disabled = treeLocked || (['rename-document', 'duplicate-document', 'delete-document'].includes(id) && !selectedPath);
     $('#pen-width').disabled = treeLocked;
     $('#workspace-switcher').disabled = isLocked();
     for (const button of $$('#document-tabs button')) button.disabled = hardwareJob || controllerBusy();
@@ -493,7 +494,7 @@
     const items = [];
     if (node.type !== 'dir') items.push(['打开', () => activate(node)]);
     if (node.type === 'link') items.push(['打开 G-code', () => openPath(node.path, 'gcode')]);
-    items.push(['新建稿件…', () => createDraft(folder)], ['新建文件夹…', () => createFolder(folder)], ['导入到此处…', () => importInto(folder)]);
+    items.push(['新建稿件…', () => createDraft(folder)], ['从模板新建…', () => createFromTemplate(folder)], ['新建文件夹…', () => createFolder(folder)], ['导入到此处…', () => importInto(folder)]);
     if (node.path) items.push(null, ['重命名…', () => renameNode(node)], ['创建副本', () => duplicateNode(node)], ['删除…', () => deleteNode(node), 'danger']);
     menu = element('div', 'context-menu');
     menu.setAttribute('role', 'menu');
@@ -884,6 +885,121 @@
     $('#drawing-width').dispatchEvent(new Event('input', { bubbles: true }));
   });
 
+  // ---------- templates ----------
+  /** Built-in templates plus every .wtt file in this workspace. */
+  async function availableTemplates() {
+    const own = [];
+    for (const entry of entries.filter((item) => item.type === 'file' && Links.extname(item.path) === '.wtt')) {
+      try { own.push({ ...Templates.normalizeTemplate(JSON.parse((await fsys.read(entry.path)).content), Links.stem(entry.path)), path: entry.path }); }
+      catch (error) { log(`模板 ${entry.path} 无效，已跳过：${error.message}`); }
+    }
+    return [...Templates.BUILTIN, ...own];
+  }
+  function templateThumbnail(template) {
+    const s = { ...defaults, ...template.settings };
+    let [width, height] = PAPER_SIZES[s.paper] || PAPER_SIZES.a4;
+    if (s.orientation === 'landscape') [width, height] = [height, width];
+    const options = { width, height, margin: +s.margin, gutter: 0, size: +s['font-size'], lineGap: +s['line-gap'] };
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    svg.setAttribute('aria-hidden', 'true');
+    const lined = ['lines', 'four-line'].includes(s['bg-kind']);
+    const cell = lined ? Math.max(+s['bg-cell'], options.size * (s['bg-kind'] === 'four-line' ? 4 / 3 : 1)) : +s['bg-cell'];
+    for (const rule of PathEngine.backgroundPaths({ kind: s['bg-kind'], cell, gap: +s['bg-gap'] }, options, 1)) {
+      const line = document.createElementNS(svg.namespaceURI, 'polyline');
+      line.setAttribute('points', rule.points.map((point) => point.join(',')).join(' '));
+      line.setAttribute('class', `rule${rule.dashed ? ' dashed' : ''}`);
+      svg.append(line);
+    }
+    if (s['bg-kind'] === 'none') { const frame = document.createElementNS(svg.namespaceURI, 'rect'); for (const [key, value] of Object.entries({ x: s.margin, y: s.margin, width: width - 2 * s.margin, height: height - 2 * s.margin, class: 'rule dashed' })) frame.setAttribute(key, value); svg.append(frame); }
+    return svg;
+  }
+  /** Template picker dialog → { template, name } or null. */
+  function pickTemplate({ title, confirmLabel, withName, name = '未命名', templates }) {
+    return new Promise((resolve) => {
+      const dialog = $('#template-dialog'), list = $('#template-list');
+      let chosen = 0;
+      $('#template-title').textContent = title;
+      $('#template-accept').textContent = confirmLabel;
+      $('#template-name-field').hidden = !withName;
+      $('#template-name').value = name;
+      $('#template-error').hidden = true;
+      const select = (index, focus) => {
+        chosen = index;
+        [...list.children].forEach((card, i) => { card.setAttribute('aria-checked', String(i === index)); card.tabIndex = i === index ? 0 : -1; if (i === index && focus) card.focus(); });
+      };
+      list.replaceChildren(...templates.map((template, index) => {
+        const card = element('button', 'template-card');
+        card.type = 'button'; card.setAttribute('role', 'radio');
+        card.append(templateThumbnail(template), element('strong', '', template.name), element('span', '', template.path ? `工作区 · ${template.path}` : template.description || '内置'));
+        card.addEventListener('click', () => select(index));
+        card.addEventListener('dblclick', () => $('#template-form').requestSubmit());
+        card.addEventListener('keydown', (event) => {
+          const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
+          if (step) { event.preventDefault(); select((chosen + step + templates.length) % templates.length, true); }
+        });
+        return card;
+      }));
+      select(0);
+      const finish = (result) => { dialog.removeEventListener('close', onClose); $('#template-form').removeEventListener('submit', onSubmit); if (dialog.open) dialog.close(); resolve(result); };
+      const onClose = () => finish(null);
+      const onSubmit = (event) => {
+        event.preventDefault();
+        const value = $('#template-name').value.trim();
+        const issue = withName ? Links.nameError(value) : '';
+        if (issue) { $('#template-error').textContent = issue; $('#template-error').hidden = false; $('#template-name').focus(); return; }
+        finish({ template: templates[chosen], name: value });
+      };
+      dialog.addEventListener('close', onClose);
+      $('#template-form').addEventListener('submit', onSubmit);
+      dialog.showModal();
+      if (withName) { $('#template-name').focus(); $('#template-name').select(); } else list.querySelector('[aria-checked=true]')?.focus();
+    });
+  }
+  for (const id of ['template-cancel', 'template-close']) $(`#${id}`).addEventListener('click', () => $('#template-dialog').close());
+  async function createFromTemplate(folder = currentFolder(), preselect = null) {
+    if (isLocked() || !fsys) return;
+    const templates = await availableTemplates();
+    if (preselect) { const index = templates.findIndex((item) => item.path === preselect); if (index > 0) templates.unshift(...templates.splice(index, 1)); }
+    const result = await pickTemplate({ title: '从模板新建稿件', confirmLabel: '新建', withName: true, name: '未命名', templates });
+    if (!result) return;
+    await guarded(async () => {
+      const stem = Links.uniqueStem(known, folder, result.name, ['.wtl', '.txt', '.md', '.gcode']);
+      const link = Links.normalizeLink({ settings: { ...defaults, ...result.template.settings }, motion: { ...motionDefaults }, glyphs: Glyphs.normalizeSelection() }, Links.join(folder, `${stem}.wtl`));
+      await fsys.write(Links.join(folder, `${stem}.txt`), result.template.text || '', null);
+      await fsys.write(Links.join(folder, `${stem}.wtl`), Links.serializeLink(link), null);
+      if (folder) expanded.add(folder);
+      await refreshTree();
+      await openPath(Links.join(folder, `${stem}.wtl`), 'preview');
+      log(`已用模板「${result.template.name}」新建稿件「${stem}」。`);
+    });
+  }
+  $('#apply-template').addEventListener('click', async () => {
+    if (isLocked() || !active() || active().kind === 'gcode') return;
+    const result = await pickTemplate({ title: '套用模板到当前稿件', confirmLabel: '套用', withName: false, templates: await availableTemplates() });
+    if (!result || isLocked()) return;
+    // Only layout settings change; the text is kept (starter text is used only when the draft is empty).
+    for (const [key, value] of Object.entries(result.template.settings)) {
+      const field = $(`#${key}`);
+      if (field && validSetting(key, value) && field.value !== value) { field.value = value; field.dispatchEvent(new Event('input', { bubbles: true })); field.dispatchEvent(new Event('change', { bubbles: true })); }
+    }
+    if (!content.value.trim() && result.template.text) { content.value = result.template.text; content.dispatchEvent(new Event('input', { bubbles: true })); }
+    log(`已套用模板「${result.template.name}」。`);
+  });
+  $('#save-template').addEventListener('click', async () => {
+    if (isLocked() || !active() || !fsys) return;
+    const name = await AppDialogs.askText({ title: '存为模板', message: '保存当前稿件的版式与背景（以及正文，作为新稿件的起始内容）到工作区的「模板」文件夹。', value: active().kind === 'link' ? Links.stem(active().key) : '我的模板', confirmLabel: '保存', validate: Links.nameError });
+    if (!name) return;
+    await guarded(async () => {
+      if (!known.has('模板')) await fsys.mkdir('模板');
+      const stem = Links.uniqueStem(known, '模板', name.trim(), ['.wtt']);
+      await fsys.write(Links.join('模板', `${stem}.wtt`), Templates.serialize(Templates.fromDraft(name.trim(), config(), content.value)), null);
+      expanded.add('模板');
+      log(`已保存模板 模板/${stem}.wtt，可在「从模板新建」中使用。`);
+    });
+  });
+
   // ---------- workspaces ----------
   const uiStateKey = () => fsys ? `${STATE_PREFIX}${fsys.backend}:${fsys.name}` : '';
   function persistUiState() {
@@ -1063,6 +1179,8 @@
   $('#new-document').addEventListener('click', () => createDraft());
   $('#welcome-new').addEventListener('click', () => createDraft(''));
   $('#new-folder').addEventListener('click', () => createFolder());
+  $('#new-from-template').addEventListener('click', () => createFromTemplate());
+  $('#welcome-template').addEventListener('click', () => createFromTemplate(''));
   $('#import-document').addEventListener('click', () => importInto(currentFolder()));
   $('#welcome-import').addEventListener('click', () => importInto(''));
   $('#refresh-tree').addEventListener('click', () => refreshTree());

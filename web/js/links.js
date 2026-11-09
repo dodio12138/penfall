@@ -10,7 +10,7 @@
   const TEXT_TYPES = ['.txt', '.md'];
   const CODE_TYPES = ['.gcode', '.nc', '.tap'];
   const DRAWING_TYPES = ['.svg', '.dxf'];
-  const FILE_TYPES = [...TEXT_TYPES, ...CODE_TYPES, ...DRAWING_TYPES, '.wtl', '.wtw'];
+  const FILE_TYPES = [...TEXT_TYPES, ...CODE_TYPES, ...DRAWING_TYPES, '.wtl', '.wtw', '.wtt'];
   const DEFAULT_PENS = [{ name: '黑', color: '#1f2328' }, { name: '红', color: '#d0342c' }, { name: '蓝', color: '#2563eb' }];
   const VIEWS = ['editor', 'gcode', 'preview', 'path'];
   const PART = /^[^\u0000-\u001f\\/:*?"<>|]{1,120}$/;

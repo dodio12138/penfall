@@ -18,25 +18,86 @@
     const left = (page) => margin + (page % 2 ? gutter : 0), right = (page) => width - margin - (page % 2 ? 0 : gutter);
     const chars = Array.from(text);
     const placements = [], missing = new Set();
+    // Grid paper (方格 / 田字格 / 稿纸): one character per cell, centred. Lined paper: fixed row pitch.
+    const grid = options.grid && options.grid.cell > 0 ? options.grid : null;
+    const pitch = grid ? grid.cell + (grid.gap || 0) : options.pitch > 0 ? options.pitch : size + lineGap;
+    const rowHeight = grid ? grid.cell : size;
     let page = 1, x = left(1), y = margin, overflow = false;
     for (let index = 0; index < chars.length; index++) {
       let char = chars[index];
       if (char === '\r') { if (chars[index + 1] === '\n') continue; char = '\n'; }
-      if (char === '\n') { x = left(page); y += size + lineGap; continue; }
+      if (char === '\n') { x = left(page); y += pitch; continue; }
       const blank = /\s/.test(char);
       const glyph = blank ? null : resolve(index, char);
       if (!blank && !glyph) missing.add(char);
-      const body = blank ? (char === '\t' ? 4 * (size * WHITESPACE_ADVANCE + gap) - gap : size * WHITESPACE_ADVANCE) : glyph ? glyph.advance / glyph.unitsPerEm * size : fallbackAdvance(char);
-      if (x + body > right(page) && x > left(page)) { x = left(page); y += size + lineGap; }
-      if (y + size > height - margin) {
+      const width = blank ? (char === '\t' ? 4 * (size * WHITESPACE_ADVANCE + gap) - gap : size * WHITESPACE_ADVANCE) : glyph ? glyph.advance / glyph.unitsPerEm * size : fallbackAdvance(char);
+      const body = grid ? grid.cell : width;
+      if (x + body > right(page) + 1e-9 && x > left(page)) { x = left(page); y += pitch; }
+      if (y + rowHeight > height - margin + 1e-9) {
         // Continue on a new sheet; the machine writes one page per program.
         if (page >= MAX_PAGES) { overflow = true; break; }
         page++; x = left(page); y = margin;
       }
-      if (!blank) placements.push({ index, char, x, y, page, width: body, glyph });
-      x += body + gap;
+      if (!blank) placements.push(grid
+        ? { index, char, x: x + (grid.cell - width) / 2, y: y + (grid.cell - size) / 2, page, width, glyph }
+        : { index, char, x, y, page, width, glyph });
+      x += body + (grid ? 0 : gap);
     }
     return { placements, missing: [...missing], overflow, pages: page };
+  }
+
+  const BACKGROUNDS = ['none', 'lines', 'four-line', 'grid', 'tianzige', 'mizige', 'composition'];
+  const GRID_BACKGROUNDS = ['grid', 'tianzige', 'mizige', 'composition'];
+  /** Dashed line as short pen strokes (so a pen can draw it too). */
+  function dashed(a, b, dash = 1.2, space = 1.2) {
+    const length = Math.hypot(b[0] - a[0], b[1] - a[1]), parts = [];
+    for (let at = 0; at < length; at += dash + space) {
+      const end = Math.min(length, at + dash);
+      parts.push([[a[0] + (b[0] - a[0]) * at / length, a[1] + (b[1] - a[1]) * at / length], [a[0] + (b[0] - a[0]) * end / length, a[1] + (b[1] - a[1]) * end / length]]);
+    }
+    return parts;
+  }
+  /**
+   * Paper ruling for every page, matching layoutText's rows / cells exactly.
+   * background: { kind, cell (grid cell or line pitch, mm), gap (row gap for 稿纸) } → [{ page, points, dashed }]
+   */
+  function backgroundPaths(background, options, pages) {
+    const kind = background?.kind;
+    if (!kind || kind === 'none') return [];
+    const { width, height, margin, size } = options, gutter = options.gutter || 0;
+    const result = [];
+    for (let page = 1; page <= pages; page++) {
+      const left = margin + (page % 2 ? gutter : 0), right = width - margin - (page % 2 ? 0 : gutter), bottom = height - margin;
+      const add = (points, isDashed = false) => result.push({ page, points, dashed: isDashed });
+      if (GRID_BACKGROUNDS.includes(kind)) {
+        const cell = background.cell, gap = kind === 'composition' ? background.gap || 0 : 0;
+        const columns = Math.floor((right - left) / cell + 1e-9), rows = Math.floor((bottom - margin + gap) / (cell + gap) + 1e-9);
+        if (columns < 1 || rows < 1) continue;
+        const x1 = left + columns * cell;
+        for (let row = 0; row < rows; row++) {
+          const top = margin + row * (cell + gap), low = top + cell;
+          if (gap || row === 0) add([[left, top], [x1, top]]);
+          add([[left, low], [x1, low]]);
+          for (let column = 0; column <= columns; column++) add([[left + column * cell, top], [left + column * cell, low]]);
+          if (kind === 'tianzige' || kind === 'mizige') for (let column = 0; column < columns; column++) {
+            const cx = left + column * cell;
+            for (const part of [...dashed([cx, top + cell / 2], [cx + cell, top + cell / 2]), ...dashed([cx + cell / 2, top], [cx + cell / 2, low])]) add(part, true);
+            if (kind === 'mizige') for (const part of [...dashed([cx, top], [cx + cell, low]), ...dashed([cx + cell, top], [cx, low])]) add(part, true);
+          }
+        }
+      } else {
+        const pitch = background.cell > 0 ? background.cell : size + (options.lineGap || 0);
+        for (let top = margin; top + size <= bottom + 1e-9; top += pitch) {
+          if (kind === 'lines') add([[left, top + size + .6], [right, top + size + .6]]);
+          else for (const [ratio, isDashed] of [[0, false], [1 / 3, true], [1, false], [4 / 3, false]]) {
+            const y = top + size * ratio;
+            if (y > bottom + 1e-9) continue;
+            if (isDashed) for (const part of dashed([left, y], [right, y], 2, 1.5)) add(part, true); else add([[left, y], [right, y]]);
+          }
+        }
+      }
+    }
+    return result;
   }
 
   /** Greedy nearest-neighbour order (paths may be reversed) to cut pen-up travel between drawing strokes. */
@@ -166,7 +227,7 @@
     });
     return {segments,errors,commands,bounds,length};
   }
-  const api={generate,parse,layoutText,orderPaths,MAX_PAGES};
+  const api={generate,parse,layoutText,orderPaths,backgroundPaths,BACKGROUNDS,GRID_BACKGROUNDS,MAX_PAGES};
   if(typeof module!=='undefined'&&module.exports) module.exports=api;
   else root.PathEngine=api;
 })(typeof window!=='undefined'?window:globalThis);

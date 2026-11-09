@@ -4,6 +4,14 @@ const LEGACY_PROGRAM_KEYS = { code: 'web-typewriter:gcode:v1', dirty: 'web-typew
 const SIM_TICK_MS = 50;
 const SIM_RAPID_FEED = 3000; // mm/min estimate for G0 travel moves.
 const codeEditor = $('#gcode');
+/** Show only the background fields that apply to the chosen ruling. */
+function updateBackgroundFields() {
+  const kind = $('#bg-kind').value;
+  $('#bg-cell-label').hidden = kind === 'none';
+  $('#bg-cell-label').firstChild.textContent = ['lines', 'four-line'].includes(kind) ? '行距 / mm' : '格子 / mm';
+  $('#bg-gap-label').hidden = kind !== 'composition';
+  $('#bg-pen-label').hidden = kind === 'none' || $('#bg-write').value !== 'yes';
+}
 const motionInputs = ['feed', 'pen-up', 'pen-down', 'origin-corner', 'origin-x', 'origin-y', 'x-dir', 'y-dir', 'page', 'page-set', 'text-pen', 'pen'];
 // Which job of the draft is generated: one page × one pen. They only change the generator output.
 const JOB_INPUTS = ['page', 'page-set', 'pen'];
@@ -80,7 +88,7 @@ function setProgram(text, view, source = 'manual', options) {
 function buildProgram() {
   if (!settings.every((id) => validSetting(id, $(`#${id}`).value)) || !motionInputs.every((id) => $(`#${id}`).checkValidity() && $(`#${id}`).value !== '')) throw Error('请修正排版或笔轴参数。');
   const c = config();
-  return PathEngine.generate(content.value, { width: layout.width, height: layout.height, margin: +c.margin, gutter: +c.gutter, size: +c['font-size'], gap: +c['letter-gap'], lineGap: +c['line-gap'], feed: +$('#feed').value, penUp: +$('#pen-up').value, penDown: +$('#pen-down').value, origin: penOrigin(), resolve: glyphResolver(), page: currentPage(), paths: layout.paths, pen: $('#pen').value, textPen: Number($('#text-pen').value) || 1 });
+  return PathEngine.generate(content.value, { width: layout.width, height: layout.height, margin: +c.margin, gutter: +c.gutter, size: +c['font-size'], gap: +c['letter-gap'], lineGap: +c['line-gap'], feed: +$('#feed').value, penUp: +$('#pen-up').value, penDown: +$('#pen-down').value, origin: penOrigin(), resolve: glyphResolver(), page: currentPage(), paths: [...(layout.backgroundWritten ? layout.background.map((rule) => ({ page: rule.page, pen: Number($('#bg-pen').value) || 1, points: rule.points })) : []), ...layout.paths], pen: $('#pen').value, textPen: Number($('#text-pen').value) || 1, grid: layout.layoutOptions.grid, pitch: layout.layoutOptions.pitch });
 }
 function generateProgram(view = 'gcode') {
   clearTimeout(regenerateTimer);
@@ -207,6 +215,7 @@ for (const id of ['machine-x', 'machine-y']) $(`#${id}`).addEventListener('input
 // Switching pages only changes generator output; imported / edited programs are unaffected.
 $('#page-set').addEventListener('input', () => { setPage(currentPage()); updatePagers(); });
 $('#pen').addEventListener('input', updatePenPicker);
+for (const id of ['bg-kind', 'bg-write']) $(`#${id}`).addEventListener('input', updateBackgroundFields);
 /** The 笔 picker appears only when this page uses more than one pen. */
 function updatePenPicker() {
   const pens = usedPens();

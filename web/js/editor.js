@@ -3,8 +3,8 @@
 const LEGACY_DRAFT_KEYS = ['web-typewriter:workspace:v2', 'web-typewriter:draft:v1'];
 const title = $('#title');
 const content = $('#content');
-const settings = ['paper', 'orientation', 'font', 'font-size', 'line-gap', 'letter-gap', 'margin', 'gutter'];
-const defaults = { paper: 'a4', orientation: 'portrait', font: 'serif', 'font-size': '5', 'line-gap': '3', 'letter-gap': '1', margin: '20', gutter: '0' };
+const settings = ['paper', 'orientation', 'font', 'font-size', 'line-gap', 'letter-gap', 'margin', 'gutter', 'bg-kind', 'bg-cell', 'bg-gap', 'bg-write', 'bg-pen'];
+const defaults = { paper: 'a4', orientation: 'portrait', font: 'serif', 'font-size': '5', 'line-gap': '3', 'letter-gap': '1', margin: '20', gutter: '0', 'bg-kind': 'none', 'bg-cell': '10', 'bg-gap': '0', 'bg-write': 'no', 'bg-pen': '1' };
 const PAPER_SIZES = { a4: [210, 297], a5: [148, 210] };
 const PREVIEW_PX_PER_MM = 2.5;
 const ORIGIN_DEFAULTS = { 'origin-corner': 'bottom-left', 'origin-x': '0', 'origin-y': '0', 'x-dir': '1', 'y-dir': '1' };
@@ -107,7 +107,7 @@ function penName(index) { return penList()[index - 1]?.name || `笔 ${index}`; }
 function penColor(index) { return penList()[index - 1]?.color || '#30343a'; }
 /** Rebuild the pen pickers after the pen rack changed, keeping valid choices. */
 function renderPenOptions() {
-  for (const [id, withAll] of [['text-pen', false], ['pen', true]]) {
+  for (const [id, withAll] of [['text-pen', false], ['bg-pen', false], ['pen', true]]) {
     const select = $(`#${id}`), value = select.value;
     select.replaceChildren(...(withAll ? [new Option('全部（不换笔）', 'all')] : []), ...penList().map((pen, index) => new Option(`${index + 1} · ${pen.name}`, String(index + 1))));
     select.value = [...select.options].some((option) => option.value === value) ? value : select.options[0].value;
@@ -139,6 +139,7 @@ function usedPens(page) {
   const pens = new Set();
   const textPen = Number($('#text-pen').value) || 1;
   if ((layout.placements || []).some((item) => page === undefined || item.page === page)) pens.add(textPen);
+  if (layout.backgroundWritten && (layout.background || []).some((item) => page === undefined || item.page === page)) pens.add(Number($('#bg-pen').value) || 1);
   for (const path of layout.paths || []) if (page === undefined || path.page === page) pens.add(path.pen);
   return [...pens].sort((a, b) => a - b);
 }
@@ -153,10 +154,17 @@ function makeLayout() {
   context.font = `${size}px ${c.font}`;
   const widths = new Map();
   const fallbackAdvance = (char) => { if (!widths.has(char)) widths.set(char, context.measureText(char).width); return widths.get(char); };
-  const result = PathEngine.layoutText(content.value, { width, height, margin: Number(c.margin), gutter: Number(c.gutter), size, gap: Number(c['letter-gap']), lineGap: Number(c['line-gap']) }, glyphResolver({ preview: true }), fallbackAdvance);
+  const background = { kind: c['bg-kind'], cell: Number(c['bg-cell']), gap: Number(c['bg-gap']) };
+  const gridPaper = PathEngine.GRID_BACKGROUNDS.includes(background.kind);
+  const lined = ['lines', 'four-line'].includes(background.kind);
+  const options = { width, height, margin: Number(c.margin), gutter: Number(c.gutter), size, gap: Number(c['letter-gap']), lineGap: Number(c['line-gap']), grid: gridPaper ? { cell: background.cell, gap: background.kind === 'composition' ? background.gap : 0 } : null, pitch: lined ? Math.max(background.cell, size * (background.kind === 'four-line' ? 4 / 3 : 1)) : 0 };
+  const result = PathEngine.layoutText(content.value, options, glyphResolver({ preview: true }), fallbackAdvance);
   const placement = drawingPlacement();
   const paths = placement ? Drawing.placePaths(drawingState.model, placement, penList()) : [];
-  return { width, height, margin: Number(c.margin), gutter: Number(c.gutter), size, font: c.font, paper: c.paper, orientation: c.orientation, placements: result.placements, glyphs: result.placements, paths, missing: result.missing, overflow: result.overflow, pages: Math.max(result.pages, placement?.page || 1) };
+  const pages = Math.max(result.pages, placement?.page || 1);
+  // Ruling matches the text rows / cells; with 用笔画出 it is written like a drawing with its own pen.
+  const ruling = PathEngine.backgroundPaths({ ...background, cell: lined ? options.pitch : background.cell }, options, pages);
+  return { width, height, margin: Number(c.margin), gutter: Number(c.gutter), size, font: c.font, paper: c.paper, orientation: c.orientation, placements: result.placements, glyphs: result.placements, paths, background: ruling, backgroundWritten: c['bg-write'] === 'yes' && ruling.length > 0, layoutOptions: options, missing: result.missing, overflow: result.overflow, pages };
 }
 /** Pages included in the current writing set (all / odd / even), in order. */
 function pageSet() {
@@ -221,6 +229,7 @@ function updateLayoutInfo() {
   updatePagers();
   updateOriginSummary();
   if (typeof updatePenPicker === 'function') updatePenPicker();
+  if (typeof updateBackgroundFields === 'function') updateBackgroundFields();
 }
 function previewZoom(stage) {
   const choice = $('#zoom').value;
@@ -255,6 +264,14 @@ function renderPreview() {
   const binding = currentPage() % 2 ? layout.gutter || 0 : 0, bindingRight = currentPage() % 2 ? 0 : layout.gutter || 0;
   ctx.strokeRect(margin + binding, margin, width - 2 * margin - binding - bindingRight, height - 2 * margin);
   ctx.setLineDash([]);
+  // Paper ruling first, light (preview only) or in its pen colour (written).
+  ctx.save();
+  ctx.lineWidth = layout.backgroundWritten ? window.Workspace?.penWidth || .5 : .25;
+  for (const rule of (layout.background || []).filter((item) => item.page === currentPage())) {
+    ctx.strokeStyle = layout.backgroundWritten ? penColor(Number($('#bg-pen').value) || 1) : rule.dashed ? '#dbe1e8' : '#b9c2cf';
+    ctx.beginPath(); ctx.moveTo(...rule.points[0]); for (const point of rule.points.slice(1)) ctx.lineTo(...point); ctx.stroke();
+  }
+  ctx.restore();
   ctx.font = `${size}px ${font}`;
   ctx.textBaseline = 'top';
   ctx.lineCap = ctx.lineJoin = 'round';
