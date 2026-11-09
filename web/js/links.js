@@ -52,10 +52,57 @@
   /** Everything except the text that changes the generated program. */
   function paramsHash(link) {
     const motion = { ...link.motion };
-    return hash(JSON.stringify([Object.entries(link.settings).sort(), Object.entries(motion).sort(), link.glyphs, ...(link.drawing ? [link.drawing] : [])]));
+    const format = link.style && (link.style.runs.length || link.style.paras.length) ? [link.style] : [];
+    return hash(JSON.stringify([Object.entries(link.settings).sort(), Object.entries(motion).sort(), link.glyphs, ...(link.drawing ? [link.drawing] : []), ...format]));
   }
   /** Inputs of the generator besides parameters: the text, plus the drawing file when there is one. */
   const inputHash = (text, drawing) => drawing ? hash(`${text}\u0000${drawing}`) : hash(text);
+
+  // --- Rich formatting overlay on the plain text (kept in the .wtl, like pins) ---
+  const ALIGNS = ['left', 'center', 'right'];
+  /** runs: [{ from, to, size?, pen? }] (code point ranges); paras: [{ at, align?, indent? }] (paragraph start). */
+  function normalizeFormat(raw) {
+    const value = raw && typeof raw === 'object' ? raw : {};
+    const runs = (Array.isArray(value.runs) ? value.runs : []).slice(0, 20000).flatMap((run) => {
+      if (!run || !Number.isInteger(run.from) || !Number.isInteger(run.to) || run.from < 0 || run.to <= run.from) return [];
+      const clean = { from: run.from, to: run.to };
+      if (Number.isFinite(run.size) && run.size >= 1 && run.size <= 80) clean.size = run.size;
+      if (Number.isInteger(run.pen) && run.pen >= 1 && run.pen <= 8) clean.pen = run.pen;
+      return clean.size || clean.pen ? [clean] : [];
+    }).sort((a, b) => a.from - b.from);
+    const seen = new Set();
+    const paras = (Array.isArray(value.paras) ? value.paras : []).slice(0, 20000).flatMap((para) => {
+      if (!para || !Number.isInteger(para.at) || para.at < 0 || seen.has(para.at)) return [];
+      const clean = { at: para.at };
+      if (ALIGNS.includes(para.align) && para.align !== 'left') clean.align = para.align;
+      if (Number.isFinite(para.indent) && para.indent > 0 && para.indent <= 100) clean.indent = para.indent;
+      if (!clean.align && !clean.indent) return [];
+      seen.add(para.at);
+      return [clean];
+    }).sort((a, b) => a.at - b.at);
+    return { runs, paras };
+  }
+  /**
+   * Keep formatting attached to the same text across an edit (one contiguous change), like a word processor:
+   * text typed at the end of a run continues the run; paragraphs keep their attributes.
+   */
+  function shiftFormat(format, before, after) {
+    if (before === after || (!format.runs.length && !format.paras.length)) return format;
+    const a = Array.from(before), b = Array.from(after);
+    let prefix = 0;
+    while (prefix < a.length && prefix < b.length && a[prefix] === b[prefix]) prefix++;
+    let suffix = 0;
+    while (suffix < a.length - prefix && suffix < b.length - prefix && a[a.length - 1 - suffix] === b[b.length - 1 - suffix]) suffix++;
+    const oldEnd = a.length - suffix, newEnd = b.length - suffix, delta = b.length - a.length;
+    const runs = format.runs.map((run) => {
+      const from = run.from < prefix ? run.from : run.from >= oldEnd ? run.from + delta : prefix;
+      const to = run.to < prefix ? run.to : run.to === prefix ? (run.from < prefix ? newEnd : run.to) : run.to >= oldEnd ? run.to + delta : newEnd;
+      return { ...run, from, to };
+    }).filter((run) => run.to > run.from && run.from < b.length).map((run) => ({ ...run, to: Math.min(run.to, b.length) }));
+    const paras = format.paras.map((para) => ({ ...para, at: para.at <= prefix ? para.at : para.at >= oldEnd ? para.at + delta : -1 }))
+      .filter((para) => para.at >= 0 && para.at <= b.length && (para.at === 0 || b[para.at - 1] === '\n'));
+    return { runs, paras };
+  }
 
   function normalizeLink(raw, linkPath) {
     const value = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
@@ -73,6 +120,7 @@
       motion: strings(value.motion),
       glyphs: Glyphs.normalizeSelection(value.glyphs),
       view: VIEWS.includes(value.view) ? value.view : 'editor',
+      style: normalizeFormat(value.style), // rich formatting overlay (sizes, pens, alignment, indents)
       // Optional drawing (SVG / DXF in the same folder) placed on a page: x / y = top-left on paper, width in mm.
       drawing: drawing && typeof drawing.file === 'string' && validPart(drawing.file) && DRAWING_TYPES.includes(extname(drawing.file))
         ? { file: drawing.file, page: Number.isInteger(drawing.page) && drawing.page >= 1 && drawing.page <= 99 ? drawing.page : 1, x: number(drawing.x, -1000, 2000), y: number(drawing.y, -1000, 2000), width: number(drawing.width, .1, 4000) }
@@ -179,7 +227,7 @@
     return { format: ARCHIVE_FORMAT, version: 1, name: typeof raw.name === 'string' ? raw.name.slice(0, 120) : '', dirs, files };
   }
 
-  const api = { inputHash, LINK_FORMAT, WORKSPACE_FORMAT, ARCHIVE_FORMAT, MANIFEST, TEXT_TYPES, CODE_TYPES, DRAWING_TYPES, DEFAULT_PENS, FILE_TYPES, dirname, basename, extname, stem, join, validPart, validPath, nameError, uniqueStem, hash, paramsHash, normalizeLink, serializeLink, markSynced, analyzeSync, normalizeManifest, buildTree, documentFor, normalizeArchive };
+  const api = { normalizeFormat, shiftFormat, inputHash, LINK_FORMAT, WORKSPACE_FORMAT, ARCHIVE_FORMAT, MANIFEST, TEXT_TYPES, CODE_TYPES, DRAWING_TYPES, DEFAULT_PENS, FILE_TYPES, dirname, basename, extname, stem, join, validPart, validPath, nameError, uniqueStem, hash, paramsHash, normalizeLink, serializeLink, markSynced, analyzeSync, normalizeManifest, buildTree, documentFor, normalizeArchive };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Links = api;
 })(typeof window !== 'undefined' ? window : globalThis);

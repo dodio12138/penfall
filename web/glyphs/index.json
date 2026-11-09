@@ -4,8 +4,8 @@
       "id": "skeleton-kai",
       "name": "骨架楷体（单线）",
       "file": "skeleton-kai.json",
-      "chars": 6884,
-      "description": "GB2312 全部 6763 个汉字、中文标点及英文字母数字，由开源楷体字体骨架化生成的单线近似（SIL OFL 1.1）。"
+      "chars": 7544,
+      "description": "GB2312 全部汉字与符号（含希腊字母、数学符号）、中文标点及英文字母数字，由开源楷体字体骨架化生成的单线近似（SIL OFL 1.1）。"
     },
     {
       "id": "demo-variants",

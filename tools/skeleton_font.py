@@ -24,11 +24,14 @@ PAD = 24            # margin around the em box (px); strokes may overshoot it
 UNITS = 1000        # output units per em
 NEIGHBOURS = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
 PUNCTUATION = '，。、；：？！“”‘’（）《》〈〉【】「」『』—…·～'
+# Maths symbols used by the formula engine (web/js/math.js), beyond GB2312.
+MATH_EXTRA = '∓∼⇒⊂⊃∂∇△⊙⋯→←↑↓∈∪∩∠⊥∥∵∴°′″≈≡≠≤≥∝∞∑∏∫∮√±×÷·'
 
 
 def gb2312(level=None):
+    """GB2312 characters: level 1 / 2 hanzi, or (level=None) all hanzi plus symbol rows (Greek, maths, full-width)."""
     chars = []
-    rows = range(0xB0, 0xF8) if level is None else range(0xB0, 0xD8) if level == 1 else range(0xD8, 0xF8)
+    rows = [*range(0xA1, 0xAA), *range(0xB0, 0xF8)] if level is None else range(0xB0, 0xD8) if level == 1 else range(0xD8, 0xF8)
     for high in rows:
         for low in range(0xA1, 0xFF):
             try:
@@ -301,7 +304,14 @@ def main():
     parser.add_argument('--preview', help='write a PNG contact sheet of the first 120 characters')
     args = parser.parse_args()
     chars = gb2312() if args.chars == 'gb2312' else gb2312(1) if args.chars == 'level1' else list(dict.fromkeys(args.chars))
-    chars += [c for c in PUNCTUATION + ''.join(chr(code) for code in range(33, 127)) if c not in chars]
+    chars = list(dict.fromkeys(chars + list(PUNCTUATION + MATH_EXTRA + ''.join(chr(code) for code in range(33, 127)))))
+    # Only characters the font really has: a missing glyph would be skeletonized from the .notdef box.
+    from fontTools.ttLib import TTFont
+    cmap = TTFont(args.font, lazy=True).getBestCmap()
+    absent = [c for c in chars if ord(c) not in cmap]
+    chars = [c for c in chars if ord(c) in cmap]
+    if absent:
+        print(f'not in font, skipped: {"".join(absent[:80])}', file=sys.stderr)
     glyphs, failed = [], []
     with Pool(initializer=_init, initargs=(args.font,)) as pool:
         for index, (char, variant) in enumerate(pool.imap(_work, chars, chunksize=16)):

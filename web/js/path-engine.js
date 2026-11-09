@@ -8,42 +8,132 @@
 
   /**
    * Shared by the paper preview and the generator so both place every character identically.
-   * resolve(index, char) → glyph | null; fallbackAdvance(char) → mm width for characters without a glyph.
-   * Indexes are Unicode code point positions in the original text (used by per-character pins).
+   * resolve(index, char) → glyph | null; fallbackAdvance(char) → mm width (at the base size) for characters without a glyph.
+   * Indexes are Unicode code point positions in the original text (used by pins and formatting).
+   *
+   * options.format = { runs: [{ from, to, size?, pen? }], paras: [{ at, align?, indent? }] }  (optional rich formatting)
+   * options.math(source, size, index) → { width, height, depth, strokes } lays out \( … \) formulas (optional).
+   * Returns placements (glyphs and formulas), carets (one per index, for editing on the paper), missing, overflow, pages.
    */
   function layoutText(text, options, resolve = defaultResolver(), fallbackAdvance = () => options.size * WHITESPACE_ADVANCE) {
-    const { width, height, margin, size, gap, lineGap } = options;
+    const { width, height, margin, size: baseSize, gap, lineGap } = options;
     // Binding gutter for double-sided writing: left side on odd pages, right side on even pages.
     const gutter = options.gutter || 0;
-    const left = (page) => margin + (page % 2 ? gutter : 0), right = (page) => width - margin - (page % 2 ? 0 : gutter);
+    const left = (page) => margin + (page % 2 ? gutter : 0);
+    const available = width - margin * 2 - gutter;
+    const bottom = height - margin;
     const chars = Array.from(text);
-    const placements = [], missing = new Set();
-    // Grid paper (方格 / 田字格 / 稿纸): one character per cell, centred. Lined paper: fixed row pitch.
-    const grid = options.grid && options.grid.cell > 0 ? options.grid : null;
-    const pitch = grid ? grid.cell + (grid.gap || 0) : options.pitch > 0 ? options.pitch : size + lineGap;
-    const rowHeight = grid ? grid.cell : size;
-    let page = 1, x = left(1), y = margin, overflow = false;
-    for (let index = 0; index < chars.length; index++) {
-      let char = chars[index];
-      if (char === '\r') { if (chars[index + 1] === '\n') continue; char = '\n'; }
-      if (char === '\n') { x = left(page); y += pitch; continue; }
-      const blank = /\s/.test(char);
-      const glyph = blank ? null : resolve(index, char);
-      if (!blank && !glyph) missing.add(char);
-      const width = blank ? (char === '\t' ? 4 * (size * WHITESPACE_ADVANCE + gap) - gap : size * WHITESPACE_ADVANCE) : glyph ? glyph.advance / glyph.unitsPerEm * size : fallbackAdvance(char);
-      const body = grid ? grid.cell : width;
-      if (x + body > right(page) + 1e-9 && x > left(page)) { x = left(page); y += pitch; }
-      if (y + rowHeight > height - margin + 1e-9) {
-        // Continue on a new sheet; the machine writes one page per program.
-        if (page >= MAX_PAGES) { overflow = true; break; }
-        page++; x = left(page); y = margin;
-      }
-      if (!blank) placements.push(grid
-        ? { index, char, x: x + (grid.cell - width) / 2, y: y + (grid.cell - size) / 2, page, width, glyph }
-        : { index, char, x, y, page, width, glyph });
-      x += body + (grid ? 0 : gap);
+    const count = chars.length;
+    const placements = [], missing = new Set(), carets = new Array(count + 1);
+    // Per-character size / pen from formatting runs; per-paragraph alignment / indent.
+    const sizes = new Float64Array(count).fill(baseSize), pens = new Int8Array(count);
+    for (const run of options.format?.runs || []) for (let i = Math.max(0, run.from); i < Math.min(count, run.to); i++) { if (run.size > 0) sizes[i] = run.size; if (run.pen > 0) pens[i] = run.pen; }
+    const paragraphs = new Map((options.format?.paras || []).map((para) => [para.at, para]));
+    // \( … \) formulas (same line), laid out as one atomic box.
+    const formulas = new Map();
+    if (options.math) for (let i = 0; i + 1 < count; i++) {
+      if (chars[i] !== '\\' || chars[i + 1] !== '(') continue;
+      for (let j = i + 2; j + 1 < count && chars[j] !== '\n'; j++) if (chars[j] === '\\' && chars[j + 1] === ')') { formulas.set(i, { end: j + 2, source: chars.slice(i + 2, j).join('') }); i = j + 1; break; }
     }
-    return { placements, missing: [...missing], overflow, pages: page };
+    let page = 1, top = margin, overflow = false;
+    const grid = options.grid && options.grid.cell > 0 ? options.grid : null;
+    const widthOf = (char, glyph, size) => /\s/.test(char)
+      ? (char === '\t' ? 4 * (size * WHITESPACE_ADVANCE + gap) - gap : size * WHITESPACE_ADVANCE)
+      : glyph ? glyph.advance / glyph.unitsPerEm * size : fallbackAdvance(char) * size / baseSize;
+
+    if (grid) {
+      // Grid paper (方格 / 田字格 / 稿纸): one character per cell, centred.
+      const pitch = grid.cell + (grid.gap || 0);
+      let x = left(1);
+      const rightEdge = () => left(page) + available;
+      for (let index = 0; index < count; index++) {
+        let char = chars[index];
+        if (char === '\r') { if (chars[index + 1] === '\n') { carets[index] = { page, x, y: top, height: grid.cell }; continue; } char = '\n'; }
+        if (char === '\n') { carets[index] = { page, x, y: top, height: grid.cell }; x = left(page); top += pitch; continue; }
+        const blank = /\s/.test(char), size = Math.min(sizes[index], grid.cell);
+        const glyph = blank ? null : resolve(index, char);
+        if (!blank && !glyph) missing.add(char);
+        if (x + grid.cell > rightEdge() + 1e-9 && x > left(page)) { x = left(page); top += pitch; }
+        if (top + grid.cell > bottom + 1e-9) {
+          if (page >= MAX_PAGES) { overflow = true; break; }
+          page++; x = left(page); top = margin;
+        }
+        carets[index] = { page, x, y: top, height: grid.cell };
+        const w = widthOf(char, glyph, size);
+        if (!blank) placements.push({ index, char, x: x + (grid.cell - w) / 2, y: top + (grid.cell - size) / 2, page, width: w, size, pen: pens[index], glyph });
+        x += grid.cell;
+      }
+      carets[count] = carets[count] || { page, x, y: top, height: grid.cell };
+      return { placements, carets, missing: [...missing], overflow, pages: page };
+    }
+
+    // Flowing text: 1) break each paragraph into rows, 2) place rows (baseline, alignment, pages).
+    const pitch = options.pitch > 0 ? options.pitch : 0;
+    let start = 0;
+    while (start <= count && !overflow) {
+      let end = start;
+      while (end < count && chars[end] !== '\n') end++;
+      const para = paragraphs.get(start) || {};
+      const indent = para.indent > 0 ? para.indent : 0;
+      const items = [];
+      for (let index = start; index < end; index++) {
+        const formula = formulas.get(index);
+        if (formula) {
+          const box = options.math(formula.source, sizes[index], index);
+          items.push({ kind: 'formula', index, end: formula.end, width: box.width, ascent: box.height, descent: box.depth, size: sizes[index], pen: pens[index], box });
+          index = formula.end - 1;
+          continue;
+        }
+        const char = chars[index];
+        if (char === '\r') continue;
+        const blank = /\s/.test(char), size = sizes[index];
+        const glyph = blank ? null : resolve(index, char);
+        if (!blank && !glyph) missing.add(char);
+        items.push({ kind: blank ? 'blank' : 'char', index, char, glyph, width: widthOf(char, glyph, size), ascent: size, descent: 0, size, pen: pens[index] });
+      }
+      const rows = [];
+      let row = [], x = 0, limit = available - indent;
+      for (const item of items) {
+        if (x + item.width > limit + 1e-9 && row.length) { rows.push(row); row = []; x = 0; limit = available; }
+        row.push({ item, x });
+        x += item.width + gap;
+      }
+      rows.push(row);
+      rows.forEach((cells, number) => {
+        if (overflow) return;
+        const ascent = cells.reduce((value, cell) => Math.max(value, cell.item.ascent), cells.length ? 0 : sizes[Math.min(start, count - 1)] || baseSize);
+        const descent = cells.reduce((value, cell) => Math.max(value, cell.item.descent), 0);
+        const rowHeight = ascent + descent;
+        if (top + rowHeight > bottom + 1e-9) {
+          // Continue on a new sheet; the machine writes one page per program.
+          if (page >= MAX_PAGES) { overflow = true; return; }
+          page++; top = margin;
+        }
+        const last = cells.at(-1);
+        const rowWidth = last ? last.x + last.item.width : 0;
+        const space = (number === 0 ? available - indent : available) - rowWidth;
+        const offset = (number === 0 ? indent : 0) + (para.align === 'center' ? space / 2 : para.align === 'right' ? space : 0);
+        const baseline = top + ascent, origin = left(page) + offset;
+        for (const { item, x: cellX } of cells) {
+          const x0 = origin + cellX;
+          const caret = { page, x: x0, y: top, height: rowHeight };
+          if (item.kind === 'formula') {
+            for (let i = item.index; i < item.end; i++) carets[i] = caret;
+            placements.push({ kind: 'formula', index: item.index, end: item.end, char: '∫', x: x0, y: baseline - item.ascent, page, width: item.width, height: rowHeight, size: item.size, pen: item.pen, box: item.box });
+            continue;
+          }
+          carets[item.index] = caret;
+          if (item.kind === 'char') placements.push({ index: item.index, char: item.char, x: x0, y: baseline - item.size, page, width: item.width, size: item.size, pen: item.pen, glyph: item.glyph });
+        }
+        // Caret after the row's last character (end of paragraph, or before the first char of the next row).
+        const after = { page, x: origin + rowWidth, y: top, height: rowHeight };
+        if (number === rows.length - 1) carets[end] = after;
+        top += pitch ? Math.max(pitch, rowHeight + (pitch - baseSize > 0 ? 0 : lineGap)) : rowHeight + lineGap;
+      });
+      start = end + 1;
+    }
+    for (let i = 0; i <= count; i++) if (!carets[i]) carets[i] = carets[i - 1] || { page: 1, x: left(1), y: margin, height: baseSize };
+    return { placements, carets, missing: [...missing], overflow, pages: page };
   }
 
   const BACKGROUNDS = ['none', 'lines', 'four-line', 'grid', 'tianzige', 'mizige', 'composition'];
@@ -149,12 +239,18 @@
       for (const p of points.slice(1)) lines.push(`G1 ${toWork(...p)} F${n(feed)}`);
       lines.push(`G0 Z${n(penUp)}`);
     };
-    for (const { x, y, glyph } of result.placements.filter((item) => item.page === page && (pen === null || pen === textPen))) {
-      const scale = size / glyph.unitsPerEm;
+    // Each character / formula is written with its own size and pen (formatting runs), else the text pen.
+    for (const item of result.placements.filter((entry) => entry.page === page && (pen === null || pen === (entry.pen || textPen)))) {
+      if (item.kind === 'formula') {
+        for (const points of item.box.strokes) stroke(points.map(([px, py]) => [item.x + px, item.y + py]));
+        continue;
+      }
+      const { x, y, glyph } = item;
+      const scale = (item.size || size) / glyph.unitsPerEm;
       const point = p => `X${n(origin.dirX*(x+p[0]*scale-origin.x))} Y${n(origin.dirY*(height-y-p[1]*scale-origin.y))}`;
-      for (const stroke of glyph.strokes) {
-        lines.push(`G0 ${point(stroke[0])}`, `G1 Z${n(penDown)} F${n(Math.min(feed,300))}`);
-        for (const p of stroke.slice(1)) lines.push(`G1 ${point(p)} F${n(feed)}`);
+      for (const strokePoints of glyph.strokes) {
+        lines.push(`G0 ${point(strokePoints[0])}`, `G1 Z${n(penDown)} F${n(Math.min(feed,300))}`);
+        for (const p of strokePoints.slice(1)) lines.push(`G1 ${point(p)} F${n(feed)}`);
         lines.push(`G0 Z${n(penUp)}`);
       }
     }

@@ -49,3 +49,19 @@ test('link and manifest normalization', () => {
   assert.throws(() => Links.normalizeArchive({ format: 'x' }), /工作区备份/);
   assert.deepEqual(Links.normalizeArchive({ format: Links.ARCHIVE_FORMAT, version: 1, files: [{ path: 'a.txt', content: 'x' }, { path: '../b.txt', content: 'y' }] }).files.map((f) => f.path), ['a.txt']);
 });
+
+test('formatting follows the text through edits', () => {
+  const format = Links.normalizeFormat({ runs: [{ from: 2, to: 4, size: 8 }, { from: 0, to: 1, size: 0 }], paras: [{ at: 0, align: 'center' }, { at: 5, indent: 7 }, { at: 3 }] });
+  assert.deepEqual(format, { runs: [{ from: 2, to: 4, size: 8 }], paras: [{ at: 0, align: 'center' }, { at: 5, indent: 7 }] });
+  const before = 'ABCD\nEFG';
+  // Typing at the end of a run continues it (word-processor behaviour); text before shifts everything.
+  assert.deepEqual(Links.shiftFormat(format, before, 'ABCDx\nEFG').runs, [{ from: 2, to: 5, size: 8 }]);
+  assert.deepEqual(Links.shiftFormat(format, before, '12ABCD\nEFG'), { runs: [{ from: 4, to: 6, size: 8 }], paras: [{ at: 0, align: 'center' }, { at: 7, indent: 7 }] });
+  // Deleting the formatted text removes the run; merging paragraphs drops the second paragraph's attributes.
+  assert.deepEqual(Links.shiftFormat(format, before, 'AB\nEFG').runs, []);
+  assert.deepEqual(Links.shiftFormat(format, before, 'ABCDEFG').paras, [{ at: 0, align: 'center' }]);
+  const link = Links.normalizeLink({ style: format }, 'a.wtl');
+  Links.markSynced(link, before, 'G0', 'generated');
+  link.style = Links.shiftFormat(link.style, before, 'ABCDx\nEFG');
+  assert.equal(Links.analyzeSync(link, before, 'G0').state, 'regenerate'); // formatting is a generator input
+});
