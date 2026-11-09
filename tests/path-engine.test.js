@@ -15,7 +15,7 @@ test('single-line text generates finite, bounded XY paths and raised final pen',
 test('unsupported Chinese is rejected instead of rendered as fake strokes', () => assert.throws(()=>generate('你好',options),/字库暂不支持/));
 test('overflow and invalid pen profiles rejected', () => {
   assert.throws(()=>generate('A'.repeat(200000),options),/页上限/);
-  assert.throws(()=>generate('A',{...options,penUp:0}),/参数无效/);
+  assert.throws(()=>generate('A',{...options,penUp:0}),/至少相差/);
 });
 test('square includes travel, writing, source lines and Z bounds', () => {
   const result=parse(fs.readFileSync(require('node:path').join(__dirname,'../web/demo.gcode'),'utf8'));

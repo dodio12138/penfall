@@ -54,3 +54,19 @@ test('brush strokes follow layout pages / pens and leave decorations unshaped', 
   assert(!underline.p && underline.points.length === 2 && underline.pen === 2);
   assert(strokes.slice(0, -1).every((stroke) => stroke.p && stroke.f && stroke.pen === 2));
 });
+
+test('Z direction comes from pen-up vs pen-down: pressing always continues away from the pen-up height', () => {
+  const brush = Brush.PENS.felt;
+  // +Z towards the paper: pen up at Z0, contact at Z5 → pressing goes to Z > 5.
+  const down = generate('HI', { ...options, penUp: 0, penDown: 5, brush });
+  const result = parse(down, 5, { mode: 'z', up: 0, down: 5 });
+  assert.deepEqual(result.errors, []);
+  assert(result.bounds.maxZ > 5 && result.bounds.maxZ <= 5 + brush.depth + 1e-9 && result.bounds.minZ >= 0);
+  assert(result.segments.some((segment) => segment.drawing));
+  assert(result.segments.filter((segment) => segment.drawing).every((segment) => segment.to.z >= 5 - 1e-6), 'writing stays at or beyond contact');
+  // Same text, +Z away from the paper: mirror image of the Z values around the contact height.
+  const up = parse(generate('HI', { ...options, penUp: 5, penDown: 0, brush }), 0, { mode: 'z', up: 5, down: 0 });
+  assert.equal(up.segments.filter((segment) => segment.drawing).length, result.segments.filter((segment) => segment.drawing).length);
+  assert(Math.abs((5 - result.bounds.maxZ) - up.bounds.minZ) < 1e-9);
+  assert.throws(() => generate('HI', { ...options, penUp: 1, penDown: 1.1 }), /至少相差/);
+});

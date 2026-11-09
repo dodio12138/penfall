@@ -22,7 +22,7 @@ function updatePenFields() {
 /** Pen lift of the draft for the generator, the preview parser and the server's job check. */
 function penLift() {
   const mode = $('#pen-mode').value;
-  return mode === 'z' ? { mode } : { mode, down: Number($('#servo-down').value), up: mode === 'servo-s' ? Number($('#servo-up').value) : null, dwell: Number($('#pen-delay').value) };
+  return mode === 'z' ? { mode, up: Number($('#pen-up').value), down: Number($('#pen-down').value) } : { mode, down: Number($('#servo-down').value), up: mode === 'servo-s' ? Number($('#servo-up').value) : null, dwell: Number($('#pen-delay').value) };
 }
 const motionInputs = ['feed', 'pen-mode', 'pen-up', 'pen-down', 'servo-down', 'servo-up', 'pen-delay', 'origin-corner', 'origin-x', 'origin-y', 'x-dir', 'y-dir', 'page', 'page-set', 'text-pen', 'pen'];
 // Which job of the draft is generated: one page × one pen. They only change the generator output.

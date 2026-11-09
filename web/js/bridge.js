@@ -160,8 +160,8 @@ async function sendJob() {
   if (!drawable()) return;
   if (programDirty) { log('G-code 与当前文稿 / 笔起点不一致（已过期），请重新生成后再发送；未发送任何内容。'); selectView('path'); return; }
   if (!$('#safety-confirm').checked) { openConnection('pane-limits'); $('#safety-confirm').focus(); log('请先在「机器 › 行程与安全」核对并勾选发送前确认。'); return; }
-  // 运笔 presses below the pen-down Z: say so here instead of a bare range error from the server.
-  if (toolpath.bounds.minZ < Number($('#machine-z-min').value) - 1e-9 || toolpath.bounds.maxZ > Number($('#machine-z-max').value) + 1e-9) { openConnection('pane-limits'); log(`程序的 Z 范围 ${toolpath.bounds.minZ.toFixed(2)}…${toolpath.bounds.maxZ.toFixed(2)} mm 超出「行程与安全」的 Z 下限 / 上限。运笔压深会低于落笔 Z，请核对弹簧笔架行程后调整 Z 下限或压深；未发送。`); return; }
+  // 运笔 presses past the pen-down Z: say so here instead of a bare range error from the server.
+  if (toolpath.bounds.minZ < Number($('#machine-z-min').value) - 1e-9 || toolpath.bounds.maxZ > Number($('#machine-z-max').value) + 1e-9) { openConnection('pane-limits'); log(`程序的 Z 范围 ${toolpath.bounds.minZ.toFixed(2)}…${toolpath.bounds.maxZ.toFixed(2)} mm 超出「行程与安全」的 Z 下限 / 上限。运笔会越过落笔 Z 继续加压，请核对弹簧笔架行程后调整 Z 范围或压深；未发送。`); return; }
   const target = window.Workspace?.activeId, source = codeEditor.value;
   const approved = window.Coordinates?.snapshot();
   const machine = window.Coordinates?.machineLimits();

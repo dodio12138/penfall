@@ -364,15 +364,16 @@
 
   const PEN_MODES = ['z', 'servo-m5', 'servo-s'];
   /**
-   * How the pen is lifted. 'z': Z axis (penUp / penDown in mm). Servo boards driven by the spindle PWM:
+   * How the pen is lifted. 'z': Z axis (penUp / penDown in mm, either direction: +Z may point away from or towards
+   * the paper; press = continuing past penDown away from penUp). Servo boards driven by the spindle PWM:
    * 'servo-m5' = M3 S<down> to write, M5 to lift; 'servo-s' = M3 S<down> / M3 S<up>. dwell (s) lets the servo settle.
    */
   function penProfile(options) {
     const lift = options.penLift || { mode: 'z' };
     if (!PEN_MODES.includes(lift.mode)) throw Error('抬笔方式无效。');
     if (lift.mode === 'z') {
-      if (![options.penUp, options.penDown].every(Number.isFinite) || options.penUp <= options.penDown) throw Error('纸张、速度或抬落笔参数无效（抬笔 Z 必须大于落笔 Z）。');
-      return { mode: 'z', up: options.penUp, down: options.penDown, dwell: 0 };
+      if (![options.penUp, options.penDown].every(Number.isFinite) || Math.abs(options.penUp - options.penDown) < .2) throw Error('抬笔 Z 与落笔 Z 至少相差 0.2 mm。');
+      return { mode: 'z', up: options.penUp, down: options.penDown, press: Math.sign(options.penDown - options.penUp), dwell: 0 };
     }
     const dwell = lift.dwell === undefined ? 0 : Number(lift.dwell);
     const valid = (value) => Number.isFinite(value) && value >= 0 && value <= 10000;
@@ -402,12 +403,15 @@
     const n = value => Number(value.toFixed(3));
     const servo = lift.mode !== 'z';
     const raise = servo ? [lift.mode === 'servo-m5' ? 'M5' : `M3 S${n(lift.up)}`, ...(lift.dwell ? [`G4 P${n(lift.dwell)}`] : [])] : [`G0 Z${n(lift.up)}`];
-    const lower = servo ? [`M3 S${n(lift.down)}`, ...(lift.dwell ? [`G4 P${n(lift.dwell)}`] : [])] : [`G1 Z${n(lift.down)} F${n(Math.min(feed,300))}`];
+    // Z pen: rapid to 0.5 mm before the paper, then touch down gently (a slow move over the whole lift took ~1 s per stroke).
+    const approach = !servo && Math.abs(lift.up - lift.down) > .6 ? [`G0 Z${n(lift.down - lift.press * .5)}`] : [];
+    const touch = (z) => [...approach, `G1 Z${z} F${n(Math.min(feed,300))}`];
+    const lower = servo ? [`M3 S${n(lift.down)}`, ...(lift.dwell ? [`G4 P${n(lift.dwell)}`] : [])] : touch(n(lift.down));
     // 运笔: pressure → extra Z depth (spring-loaded holder, Z only), speed → feed of each segment.
     const brush = Brush.normalize(options.brush);
     const depth = brush && !servo ? brush.depth : 0;
-    const zAt = (p) => n(lift.down - depth * p);
-    const profile = (servo ? `servo pen (M3 S${n(lift.down)} down, ${lift.mode === 'servo-m5' ? 'M5' : `M3 S${n(lift.up)}`} up)` : 'Z-axis pen') + (brush ? `, stroke dynamics${depth ? ` (press to Z${zAt(1)})` : ' (speed only)'}` : '');
+    const zAt = (p) => n(lift.down + lift.press * depth * p); // deeper = further from the pen-up height
+    const profile = (servo ? `servo pen (M3 S${n(lift.down)} down, ${lift.mode === 'servo-m5' ? 'M5' : `M3 S${n(lift.up)}`} up)` : `Z-axis pen (Z${n(lift.up)} up, Z${n(lift.down)} down, +Z ${lift.press < 0 ? 'away from' : 'towards'} paper)`) + (brush ? `, stroke dynamics${depth ? ` (press to Z${zAt(1)})` : ' (speed only)'}` : '');
     const lines = [`; Single-line text / ${profile} profile - review before use`,
       `; Pen zero at ${n(origin.x)} mm from paper left, ${n(origin.y)} mm from paper bottom; +X ${origin.dirX > 0 ? 'right' : 'left'}, +Y ${origin.dirY > 0 ? 'up' : 'down'}`,
       `; Page ${page} of ${pages}${pen === null ? '' : `; pen ${pen}`}`,
@@ -415,7 +419,7 @@
     const toWork = (px, py) => `X${n(origin.dirX*(px-origin.x))} Y${n(origin.dirY*(height-py-origin.y))}`;
     const stroke = (points, pressure, speed) => {
       lines.push(`G0 ${toWork(...points[0])}`);
-      if (pressure && depth) lines.push(`G1 Z${zAt(pressure[0])} F${n(Math.min(feed,300))}`); else lines.push(...lower);
+      if (pressure && depth) lines.push(...touch(zAt(pressure[0]))); else lines.push(...lower);
       points.slice(1).forEach((p, i) => lines.push(`G1 ${toWork(...p)}${pressure && depth ? ` Z${zAt(pressure[i + 1])}` : ''} F${speed ? Math.max(1, Math.round(feed * speed[i + 1])) : n(feed)}`));
       lines.push(...raise);
     };
@@ -426,7 +430,10 @@
     return lines.join('\n');
   }
   // Deliberately strict subset: do not silently simulate unknown machine commands.
-  /** profile (optional) = { mode: 'servo-s', down, up }: M3 S<up> lifts the pen instead of writing. */
+  /**
+   * profile (optional): { mode: 'servo-s', down, up }: M3 S<up> lifts the pen instead of writing;
+   * { mode: 'z', up, down }: Z axis in either direction (writing = at or beyond penDown, away from penUp).
+   */
   function parse(source, penDown=0, profile=null) {
     if (source.length > 500000) return { segments: [], errors: ['程序超过 500 KB 预览上限，请拆分。'], commands: [], bounds: { minX:0,minY:0,maxX:0,maxY:0,minZ:0,maxZ:0 }, length: 0, dwell: 0 };
     let pos={x:0,y:0,z:0}, absolute=true, unit=1, mode=0, feed=1000, explicitPen=null, spindle=false, spindleS=null, dwell=0;
@@ -473,7 +480,8 @@
       const hasXY=words.X!==undefined||words.Y!==undefined;
       const arc=[2,3].includes(mode)&&(hasXY||words.I!==undefined||words.J!==undefined);
       const rapid=mode===0;
-      const drawing=!rapid&&(explicitPen===null?next.z<=penDown+.001:explicitPen);
+      const press=profile?.mode==='z'&&Number.isFinite(profile.up)&&profile.up!==penDown?Math.sign(penDown-profile.up):-1;
+      const drawing=!rapid&&(explicitPen===null?(next.z-penDown)*press>=-.001:explicitPen);
       const add=(from,to)=>{
         const distance=Math.hypot(to.x-from.x,to.y-from.y,to.z-from.z);
         if (distance<1e-9) return;

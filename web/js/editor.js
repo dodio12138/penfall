@@ -295,11 +295,14 @@ function updateBrushFields() {
   $('#brush-fields').hidden = !on;
   $('#brush-state').textContent = on ? Brush.PENS[$('#brush-pen').value]?.name || '自定义' : '关';
   $('#brush-depth-label').hidden = !z;
-  const deepest = Number($('#pen-down').value) - Number($('#brush-depth').value);
-  const low = Number($('#machine-z-min').value);
+  // Pressing continues past the pen-down height, away from the pen-up height (works for +Z up or +Z down).
+  const up = Number($('#pen-up').value), down = Number($('#pen-down').value), press = Math.sign(down - up) || -1;
+  const deepest = down + press * Number($('#brush-depth').value);
+  const low = Number($('#machine-z-min').value), high = Number($('#machine-z-max').value);
+  const outside = deepest < low - 1e-9 || deepest > high + 1e-9;
   const note = $('#brush-note');
-  note.textContent = !on ? '' : z ? `最深落到 Z ${mm(deepest)} mm（落笔 Z 再压 ${mm(Number($('#brush-depth').value))} mm）。笔架需有弹簧；${deepest < low ? `「行程与安全」的 Z 下限 ${mm(low)} 高于此值，发送会被拒绝，请先核对并调低。` : 'Z 下限已覆盖此深度。'}` : '舵机抬笔无法边写边调笔压：只改变速度和起收笔轨迹。';
-  note.classList.toggle('warning', on && z && deepest < low);
+  note.textContent = !on ? '' : z ? `落笔 Z ${mm(down)} 是笔尖刚接触纸面的位置；加压时继续往 ${press < 0 ? 'Z 减小' : 'Z 增大'} 的方向压，最深到 Z ${mm(deepest)}（再压 ${mm(Number($('#brush-depth').value))} mm）。笔架需有弹簧；${outside ? `超出「行程与安全」的 Z 范围 ${mm(low)}…${mm(high)}，发送会被拒绝，请先核对并调整。` : '在 Z 范围内。'}` : '舵机抬笔无法边写边调笔压：只改变速度和起收笔轨迹。';
+  note.classList.toggle('warning', on && z && outside);
 }
 /** Choosing a pen type fills its parameters; editing a parameter makes the type 自定义. */
 function applyBrushPen() {
@@ -507,7 +510,7 @@ $('#natural').addEventListener('input', updateNaturalFields);
 // The pen type fills its fields first (capture phase), so the regular settings listener sees the new values.
 $('#brush-pen').addEventListener('input', applyBrushPen, true);
 for (const id of Object.keys(BRUSH_FIELDS)) $(`#${id}`).addEventListener('input', brushFieldEdited, true);
-for (const id of ['brush', 'brush-pen', 'brush-depth', 'pen-mode', 'pen-down', 'machine-z-min']) $(`#${id}`).addEventListener('input', updateBrushFields);
+for (const id of ['brush', 'brush-pen', 'brush-depth', 'pen-mode', 'pen-up', 'pen-down', 'machine-z-min', 'machine-z-max']) $(`#${id}`).addEventListener('input', updateBrushFields);
 // A new seed = another reproducible handwriting; it counts as a layout change (regenerates generated programs).
 $('#natural-reshuffle').addEventListener('click', () => {
   const field = $('#natural-seed');
