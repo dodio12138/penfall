@@ -189,10 +189,59 @@
   $('#clear-format').addEventListener('click', () => {
     if (locked()) return;
     const [from, to] = selectionRange();
-    textStyle = Links.applyRun(textStyle, from, to, { size: null, pen: null });
-    textStyle = Links.applyParagraph(textStyle, Links.paragraphStarts(content.value, from, to), { align: null, indent: null });
+    textStyle = Links.applyRun(textStyle, from, to, Object.fromEntries(Links.RUN_KEYS.map((key) => [key, null])));
+    textStyle = Links.applyParagraph(textStyle, Links.paragraphStarts(content.value, from, to), Object.fromEntries(Links.PARA_KEYS.map((key) => [key, null])));
     styleChanged();
   });
+  // Character effects toggle like a word processor: on unless the caret / selection start already has it.
+  const runAt = (index) => textStyle.runs.find((item) => item.from <= index && index < item.to) || textStyle.runs.find((item) => item.to === index) || {};
+  const pressed = (id) => $(`#${id}`).getAttribute('aria-pressed') === 'true';
+  const toggleRun = (key, value, id) => setRun({ [key]: pressed(id) ? null : value });
+  $('#run-underline').addEventListener('click', () => toggleRun('underline', true, 'run-underline'));
+  $('#run-strike').addEventListener('click', () => toggleRun('strike', true, 'run-strike'));
+  $('#run-sup').addEventListener('click', () => toggleRun('script', 'sup', 'run-sup'));
+  $('#run-sub').addEventListener('click', () => toggleRun('script', 'sub', 'run-sub'));
+  $('#list-bullet').addEventListener('click', () => setParagraph({ list: pressed('list-bullet') ? null : 'bullet' }));
+  $('#list-number').addEventListener('click', () => setParagraph({ list: pressed('list-number') ? null : 'number' }));
+  $('#para-spacing').addEventListener('change', (event) => setParagraph({ spacing: event.target.value ? Number(event.target.value) : null }));
+  content.addEventListener('keydown', (event) => {
+    if (!(event.ctrlKey || event.metaKey) || event.altKey || event.isComposing || $('.main-area').classList.contains('no-format')) return;
+    const key = event.key.toLowerCase();
+    const action = key === 'u' && !event.shiftKey ? 'run-underline' : key === 'x' && event.shiftKey ? 'run-strike' : key === '.' ? 'run-sup' : key === ',' ? 'run-sub' : '';
+    if (!action) return;
+    event.preventDefault();
+    $(`#${action}`).click();
+  });
+
+  // ---------- 格式刷: copy the formatting at the caret, apply it to the next selection ----------
+  let painter = null;
+  function setPainter(next) {
+    painter = next;
+    $('#format-painter').setAttribute('aria-pressed', String(Boolean(painter)));
+    sheet.classList.toggle('painting', Boolean(painter));
+  }
+  $('#format-painter').addEventListener('click', () => {
+    if (painter || locked()) { setPainter(null); return; }
+    const index = toCp(content.selectionStart);
+    const run = runAt(index), para = textStyle.paras.find((item) => item.at === Links.paragraphStarts(content.value, index, index)[0]) || {};
+    setPainter({ run: Object.fromEntries(Links.RUN_KEYS.map((key) => [key, run[key] ?? null])), para: Object.fromEntries(Links.PARA_KEYS.map((key) => [key, para[key] ?? null])) });
+    log('格式刷：选中要套用格式的文字（Esc 取消）。');
+    if (!content.disabled) content.focus({ preventScroll: true });
+  });
+  function paint() {
+    if (!painter || locked()) return;
+    const [from, to] = [toCp(content.selectionStart), toCp(content.selectionEnd)];
+    if (to <= from) return;
+    const { run, para } = painter;
+    setPainter(null);
+    textStyle = Links.applyRun(textStyle, from, to, run);
+    textStyle = Links.applyParagraph(textStyle, Links.paragraphStarts(content.value, from, to), para);
+    styleChanged();
+  }
+  canvas.addEventListener('pointerup', () => setTimeout(paint));
+  content.addEventListener('mouseup', () => setTimeout(paint));
+  content.addEventListener('keyup', (event) => { if (event.shiftKey) paint(); });
+  document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && painter) setPainter(null); });
   /** Toolbar shows the formatting at the caret. */
   function syncFormatBar() {
     const index = toCp(content.selectionStart);
@@ -205,6 +254,13 @@
     setSelect('para-style', Object.entries(HEADINGS).find(([, [k]]) => Math.abs(k - ratio) < .06)?.[0] || 'body');
     for (const align of ['left', 'center', 'right']) $(`#align-${align}`).setAttribute('aria-pressed', String((para.align || 'left') === align));
     $('#indent-first').setAttribute('aria-pressed', String(Boolean(para.indent)));
+    $('#run-underline').setAttribute('aria-pressed', String(Boolean(run?.underline)));
+    $('#run-strike').setAttribute('aria-pressed', String(Boolean(run?.strike)));
+    $('#run-sup').setAttribute('aria-pressed', String(run?.script === 'sup'));
+    $('#run-sub').setAttribute('aria-pressed', String(run?.script === 'sub'));
+    $('#list-bullet').setAttribute('aria-pressed', String(para.list === 'bullet'));
+    $('#list-number').setAttribute('aria-pressed', String(para.list === 'number'));
+    setSelect('para-spacing', para.spacing ? String(para.spacing) : '');
   }
   window.syncFormatBar = syncFormatBar;
   content.addEventListener('click', syncFormatBar);

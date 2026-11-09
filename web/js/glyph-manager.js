@@ -19,8 +19,8 @@ function previewSelection() {
 /** Generation always uses the saved selection; the paper preview may show a temporary library preview. */
 function glyphResolver({ preview = false } = {}) { return Glyphs.createResolver(preview ? previewSelection() : glyphSelection, glyphLibraries); }
 /** Formula glyphs: real lower-case letters / symbols first (the built-in Latin set writes lower case as capitals). */
-function mathGlyphFor() {
-  const selection = previewSelection();
+function mathGlyphFor({ preview = true } = {}) {
+  const selection = preview ? previewSelection() : glyphSelection;
   const order = [...selection.libraries.filter((id) => id !== Glyphs.BUILTIN_ID), Glyphs.BUILTIN_ID];
   const cache = new Map();
   return (char) => {
@@ -389,7 +389,7 @@ function placementAt(event) {
   const x = (event.clientX - rect.left) / rect.width * layout.width;
   const y = (event.clientY - rect.top) / rect.height * layout.height;
   const page = currentPage();
-  return layout.placements?.find((item) => item.page === page && x >= item.x - .5 && x <= item.x + item.width + .5 && y >= item.y - .5 && y <= item.y + (item.size || layout.size) + .5);
+  return layout.placements?.find((item) => item.page === page && item.kind !== 'marker' && x >= item.x - .5 && x <= item.x + item.width + .5 && y >= item.y - .5 && y <= item.y + (item.size || layout.size) + .5);
 }
 // Clicking the paper places the caret (paper editor); right-click / long-press a character chooses its variant.
 $('#preview').addEventListener('contextmenu', (event) => {

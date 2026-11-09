@@ -4,7 +4,8 @@
   const FORMAT = 'penfall/template';
   const LEGACY_FORMAT = 'web-typewriter/template'; // before the rename: still accepted
   // Layout keys a template may set (same names as the draft's settings).
-  const KEYS = ['paper', 'orientation', 'font', 'font-size', 'line-gap', 'letter-gap', 'margin', 'gutter', 'bg-kind', 'bg-cell', 'bg-gap', 'bg-write', 'bg-pen'];
+  const KEYS = ['paper', 'orientation', 'font', 'font-size', 'line-gap', 'letter-gap', 'margin', 'gutter', 'bg-kind', 'bg-cell', 'bg-gap', 'bg-write', 'bg-pen',
+    'natural', 'natural-size', 'natural-baseline', 'natural-spacing', 'natural-slant', 'natural-slant-var', 'natural-join', 'natural-seed'];
   const BUILTIN = [
     { id: 'blank', name: '空白 A4', description: '无背景，自由排版', settings: { paper: 'a4', 'bg-kind': 'none' } },
     { id: 'letter', name: '横线信纸', description: 'A4，行距 9 mm，每行字落在横线上', settings: { paper: 'a4', 'font-size': '5', 'bg-kind': 'lines', 'bg-cell': '9', margin: '20' }, text: '亲爱的：\n\n    \n\n此致\n敬礼\n' },

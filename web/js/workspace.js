@@ -6,7 +6,7 @@
   const CURRENT_KEY = 'penfall:workspace:current';
   const MIGRATED_KEY = 'penfall:migrated-to-files';
   const SAVE_DELAY = 300;
-  const motionDefaults = { feed: '1200', 'pen-up': '5', 'pen-down': '0', page: '1', 'page-set': 'all', 'text-pen': '1', pen: 'all', ...ORIGIN_DEFAULTS };
+  const motionDefaults = { feed: '1200', 'pen-mode': 'z', 'pen-up': '5', 'pen-down': '0', 'servo-down': '30', 'servo-up': '90', 'pen-delay': '0.15', page: '1', 'page-set': 'all', 'text-pen': '1', pen: 'all', ...ORIGIN_DEFAULTS };
   const TYPE_LABEL = { '.txt': 'TXT', '.md': 'MD', '.gcode': 'GC', '.nc': 'NC', '.tap': 'TAP', '.wtw': 'WS', '.wtl': '稿', '.wtt': '模', '.svg': 'SVG', '.dxf': 'DXF' };
 
   let fsys = null;
@@ -151,6 +151,8 @@
     } else doc.programSource = kind === 'gcode' ? 'manual' : '';
     return doc;
   }
+  /** Motion of a new draft: defaults, then the machine (机型) applied to this workspace. */
+  const draftMotion = () => ({ ...motionDefaults, ...manifest.machine.motion });
   const motionSnapshot = () => Object.fromEntries(motionInputs.map((id) => [id, $(`#${id}`).value]));
   function applyDocument() {
     loading = true;
@@ -276,6 +278,8 @@
     const treeLocked = isLocked() || !fsys;
     for (const id of ['new-document', 'new-from-template', 'welcome-template', 'apply-template', 'save-template', 'new-folder', 'import-document', 'welcome-new', 'welcome-import', 'refresh-tree', 'backup-workspace']) $(`#${id}`).disabled = treeLocked;
     $('#pen-width').disabled = treeLocked;
+    for (const id of ['apply-preset', 'save-preset', 'delete-preset', 'machine-preset']) $(`#${id}`).disabled = treeLocked;
+    $('#natural-reshuffle').disabled = locked;
     $('#workspace-switcher').disabled = isLocked();
     for (const button of $$('#document-tabs button')) button.disabled = hardwareJob || controllerBusy();
     if (locked) $('#start').disabled = true;
@@ -540,7 +544,7 @@
     if (!name) return;
     await guarded(async () => {
       const stem = Links.uniqueStem(known, folder, name.trim(), ['.wtl', '.txt', '.md', '.gcode']);
-      const link = Links.normalizeLink({ settings: { ...defaults }, motion: { ...motionDefaults }, glyphs: Glyphs.normalizeSelection() }, Links.join(folder, `${stem}.wtl`));
+      const link = Links.normalizeLink({ settings: { ...defaults }, motion: draftMotion(), glyphs: Glyphs.normalizeSelection() }, Links.join(folder, `${stem}.wtl`));
       await fsys.write(Links.join(folder, `${stem}.txt`), '', null);
       await fsys.write(Links.join(folder, `${stem}.wtl`), Links.serializeLink(link), null);
       if (folder) expanded.add(folder);
@@ -663,7 +667,7 @@
           const result = await Docx.parseDocx(await file.arrayBuffer(), manifest.machine.pens);
           const stem = Links.uniqueStem(known, folder, Links.stem(file.name), ['.wtl', '.txt', '.gcode']);
           await fsys.write(Links.join(folder, `${stem}.txt`), result.text, null);
-          const link = Links.normalizeLink({ settings: { ...defaults, ...result.settings }, motion: { ...motionDefaults }, style: result.style }, Links.join(folder, `${stem}.wtl`));
+          const link = Links.normalizeLink({ settings: { ...defaults, ...result.settings }, motion: draftMotion(), style: result.style }, Links.join(folder, `${stem}.wtl`));
           await fsys.write(Links.join(folder, `${stem}.wtl`), Links.serializeLink(link), null);
           first = Links.join(folder, `${stem}.wtl`);
           count++;
@@ -683,7 +687,7 @@
         if (Links.TEXT_TYPES.includes(ext)) {
           const stem = Links.uniqueStem(known, folder, Links.stem(file.name), ['.wtl', '.txt', '.md', '.gcode']);
           await fsys.write(Links.join(folder, `${stem}${ext}`), text, null);
-          const link = Links.normalizeLink({ text: `${stem}${ext}`, settings: { ...defaults }, motion: { ...motionDefaults } }, Links.join(folder, `${stem}.wtl`));
+          const link = Links.normalizeLink({ text: `${stem}${ext}`, settings: { ...defaults }, motion: draftMotion() }, Links.join(folder, `${stem}.wtl`));
           await fsys.write(Links.join(folder, `${stem}.wtl`), Links.serializeLink(link), null);
           first ||= Links.join(folder, `${stem}.wtl`);
         } else if (Links.DRAWING_TYPES.includes(ext)) {
@@ -691,7 +695,7 @@
           const stem = Links.uniqueStem(known, folder, Links.stem(file.name), ['.wtl', '.txt', ext]);
           await fsys.write(Links.join(folder, `${stem}${ext}`), text, null);
           await fsys.write(Links.join(folder, `${stem}.txt`), '', null);
-          const link = Links.normalizeLink({ settings: { ...defaults }, motion: { ...motionDefaults }, drawing: { file: `${stem}${ext}` } }, Links.join(folder, `${stem}.wtl`));
+          const link = Links.normalizeLink({ settings: { ...defaults }, motion: draftMotion(), drawing: { file: `${stem}${ext}` } }, Links.join(folder, `${stem}.wtl`));
           await fsys.write(Links.join(folder, `${stem}.wtl`), Links.serializeLink(link), null);
           first ||= Links.join(folder, `${stem}.wtl`);
           if (!files.some((item) => Links.TEXT_TYPES.includes(Links.extname(item.name)))) first = Links.join(folder, `${stem}.wtl`);
@@ -759,6 +763,8 @@
     $('#pen-width').value = String(manifest.machine.penWidth);
     renderPenOptions();
     renderPenRack();
+    restoreLimits();
+    renderPresets();
   }
   function saveManifest() {
     clearTimeout(manifestTimer);
@@ -813,6 +819,94 @@
     renderPenRack(); penRackChanged();
   });
 
+  // ---------- 机型 (machine presets) and the machine fields kept with the workspace ----------
+  const limitFields = () => Machines.LIMIT_KEYS.map((id) => $(`#${id}`));
+  /** Paper range, travel and baud are remembered per workspace (workspace.wtw), not per page load. */
+  function restoreLimits() {
+    for (const field of limitFields()) {
+      const value = manifest.machine.limits[field.id];
+      if (value === undefined) continue;
+      if (field.tagName === 'SELECT' ? [...field.options].some((option) => option.value === value) : value === '' || validSetting(field.id, value)) { field.value = value; field.dispatchEvent(new Event('input')); }
+    }
+    $('#safety-confirm').checked = false;
+    updateOriginSummary();
+  }
+  function storeLimits() {
+    manifest.machine.limits = Object.fromEntries(limitFields().map((field) => [field.id, field.value]));
+    saveManifest();
+  }
+  for (const field of limitFields()) field.addEventListener('change', storeLimits);
+  function renderPresets() {
+    const select = $('#machine-preset'), current = select.value || manifest.machine.preset;
+    const presets = Machines.allPresets(manifest.machine);
+    const groups = [['通用起点', presets.filter((preset) => preset.builtin)], ['本工作区', presets.filter((preset) => !preset.builtin)]].filter(([, list]) => list.length);
+    select.replaceChildren(...groups.map(([label, list]) => { const group = document.createElement('optgroup'); group.label = label; group.append(...list.map((preset) => new Option(preset.name, preset.id))); return group; }));
+    const match = presets.find((preset) => preset.id === current) || presets.find((preset) => preset.name === manifest.machine.preset) || presets[0];
+    select.value = match.id;
+    select.dispatchEvent(new Event('input'));
+    $('#machine-preset-state').textContent = manifest.machine.preset || '未选择';
+    describePreset();
+  }
+  function selectedPreset() { return Machines.allPresets(manifest.machine).find((preset) => preset.id === $('#machine-preset').value); }
+  function describePreset() {
+    const preset = selectedPreset();
+    const lift = { z: 'Z 轴抬笔', 'servo-m5': '舵机 M3/M5', 'servo-s': '舵机 M3 两个 S 值' }[preset?.motion['pen-mode'] || 'z'];
+    $('#machine-preset-note').textContent = preset ? preset.description || `${lift} · 速度 ${preset.motion.feed || '—'} mm/min · 纸张 ${preset.limits['machine-x'] || '—'} × ${preset.limits['machine-y'] || '—'} mm` : '';
+    $('#delete-preset').hidden = !preset || preset.builtin;
+  }
+  $('#machine-preset').addEventListener('input', describePreset);
+  /** Write a preset into the open draft (pen lift, speed, pen zero), the machine fields, and the defaults for new drafts. */
+  async function applyPreset() {
+    const preset = selectedPreset();
+    if (!preset || isLocked()) return;
+    const doc = active();
+    if (!await AppDialogs.confirm({ title: `应用机型「${preset.name}」`, message: `${doc?.link ? '当前稿件的抬笔方式、速度和笔零点，以及' : ''}本工作区的纸张范围、行程会改为预设值；之后新建的稿件也使用这些值。发送前仍需核对。`, confirmLabel: '应用' })) return;
+    const invalid = [];
+    const assign = (id, value) => { const field = $(`#${id}`); if (!field) return; if (field.tagName === 'SELECT' ? [...field.options].some((option) => option.value === value) : value === '' || validSetting(id, value)) field.value = value; else invalid.push(id); };
+    if (doc?.link) for (const [id, value] of Object.entries(preset.motion)) assign(id, value);
+    for (const [id, value] of Object.entries(preset.limits)) assign(id, value);
+    manifest.machine.preset = preset.name;
+    manifest.machine.motion = { ...preset.motion };
+    storeLimits();
+    $('#safety-confirm').checked = false;
+    renderPresets();
+    if (doc?.link) {
+      // Same path as editing the fields: re-layout, mark / regenerate the program, save the draft.
+      $('#feed').dispatchEvent(new Event('input', { bubbles: true }));
+      $('#pen-mode').dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    updateOriginSummary();
+    log(`已应用机型「${preset.name}」。${invalid.length ? `以下值无效，已跳过：${invalid.join('、')}。` : ''}发送前请在「行程与安全」核对。`);
+  }
+  async function savePreset() {
+    if (isLocked()) return;
+    const taken = new Set(Machines.allPresets(manifest.machine).map((preset) => preset.name));
+    const name = await AppDialogs.askText({ title: '存为机型预设', message: '保存当前稿件的抬笔方式、速度、笔零点，以及纸张范围和行程。预设保存在本工作区（workspace.wtw）。', value: manifest.machine.preset && !Machines.BUILTIN.some((preset) => preset.name === manifest.machine.preset) ? manifest.machine.preset : '我的写字机', confirmLabel: '保存', validate: (text) => !text ? '请输入名称' : text.length > 40 ? '名称最多 40 个字' : Machines.BUILTIN.some((preset) => preset.name === text) ? '不能与内置预设同名' : '' });
+    if (!name) return;
+    const preset = Machines.normalizePreset({ name, motion: Object.fromEntries(Machines.MOTION_KEYS.map((id) => [id, $(`#${id}`).value])), limits: Object.fromEntries(limitFields().map((field) => [field.id, field.value])) });
+    if (taken.has(name) && !await AppDialogs.confirm({ title: '覆盖预设', message: `已有预设「${name}」，用当前设置覆盖？`, confirmLabel: '覆盖' })) return;
+    manifest.machine.presets = [...manifest.machine.presets.filter((item) => item.name !== name), preset];
+    manifest.machine.preset = name;
+    manifest.machine.motion = { ...preset.motion };
+    saveManifest();
+    $('#machine-preset').value = `user:${name}`;
+    renderPresets();
+    log(`已保存机型预设「${name}」。`);
+  }
+  async function deletePreset() {
+    const preset = selectedPreset();
+    if (!preset || preset.builtin || isLocked()) return;
+    if (!await AppDialogs.confirm({ title: '删除机型预设', message: `删除「${preset.name}」？已应用到稿件的数值不会改变。`, confirmLabel: '删除', danger: true })) return;
+    manifest.machine.presets = manifest.machine.presets.filter((item) => item.name !== preset.name);
+    if (manifest.machine.preset === preset.name) manifest.machine.preset = '';
+    saveManifest();
+    $('#machine-preset').value = '';
+    renderPresets();
+  }
+  $('#apply-preset').addEventListener('click', applyPreset);
+  $('#save-preset').addEventListener('click', savePreset);
+  $('#delete-preset').addEventListener('click', deletePreset);
+
   // ---------- drawings (SVG / DXF attached to a draft) ----------
   function parseDrawingFile(name, text) {
     const ext = Links.extname(name);
@@ -848,7 +942,7 @@
       const folder = Links.dirname(path), stem = Links.stem(path);
       parseDrawingFile(path, (await fsys.read(path)).content);
       if (!known.has(Links.join(folder, `${stem}.txt`))) await fsys.write(Links.join(folder, `${stem}.txt`), '', null);
-      const link = Links.normalizeLink({ settings: { ...defaults }, motion: { ...motionDefaults }, drawing: { file: Links.basename(path) } }, Links.join(folder, `${stem}.wtl`));
+      const link = Links.normalizeLink({ settings: { ...defaults }, motion: draftMotion(), drawing: { file: Links.basename(path) } }, Links.join(folder, `${stem}.wtl`));
       await fsys.write(Links.join(folder, `${stem}.wtl`), Links.serializeLink(link), null);
       await refreshTree();
       await openPath(Links.join(folder, `${stem}.wtl`), 'preview');
@@ -981,7 +1075,7 @@
     if (!result) return;
     await guarded(async () => {
       const stem = Links.uniqueStem(known, folder, result.name, ['.wtl', '.txt', '.md', '.gcode']);
-      const link = Links.normalizeLink({ settings: { ...defaults, ...result.template.settings }, motion: { ...motionDefaults }, glyphs: Glyphs.normalizeSelection() }, Links.join(folder, `${stem}.wtl`));
+      const link = Links.normalizeLink({ settings: { ...defaults, ...result.template.settings }, motion: draftMotion(), glyphs: Glyphs.normalizeSelection() }, Links.join(folder, `${stem}.wtl`));
       await fsys.write(Links.join(folder, `${stem}.txt`), result.template.text || '', null);
       await fsys.write(Links.join(folder, `${stem}.wtl`), Links.serializeLink(link), null);
       if (folder) expanded.add(folder);
@@ -1128,7 +1222,7 @@
       await importLegacyDocuments(documents, '');
       log(`已把旧版浏览器中的 ${documents.length} 份文稿转换为工作区文件（旧数据保留未删）。`);
     } else {
-      const link = Links.normalizeLink({ settings: { ...defaults }, motion: { ...motionDefaults } }, '未命名.wtl');
+      const link = Links.normalizeLink({ settings: { ...defaults }, motion: draftMotion() }, '未命名.wtl');
       await workspace.write('未命名.txt', '', null);
       await workspace.write('未命名.wtl', Links.serializeLink(link), null);
     }

@@ -21,11 +21,21 @@
 ## `workspace.wtw`
 
 ```json
-{ "format": "penfall/workspace", "version": 1, "machine": { "penWidth": 0.5, "pens": [{ "name": "黑", "color": "#1f2328" }, { "name": "红", "color": "#d0342c" }] } }
+{ "format": "penfall/workspace", "version": 1, "machine": {
+  "penWidth": 0.5, "pens": [{ "name": "黑", "color": "#1f2328" }, { "name": "红", "color": "#d0342c" }],
+  "preset": "我的写字机",
+  "motion": { "pen-mode": "servo-m5", "servo-down": "30", "pen-delay": "0.15", "feed": "2000" },
+  "limits": { "machine-x": "210", "machine-y": "297", "machine-z-min": "0", "machine-z-max": "10", "travel-x-min": "-300", "baud": "115200" },
+  "presets": [{ "name": "我的写字机", "motion": { … }, "limits": { … } }]
+} }
 ```
 
 - `machine.penWidth`：笔在纸上画出的线宽（mm，0.05–5），用于纸张预览，以及刀轨页「按笔宽显示」。
 - `machine.pens`：笔架，1–8 支，按顺序编号为笔 1、笔 2……；图形颜色自动对应到颜色最接近的笔。
+- `machine.preset`：最近应用的机型预设名称（「机器 › 机型」）。
+- `machine.motion`：机型的抬笔方式、速度和笔零点。之后新建的稿件以它为默认值（字段名同 `.wtl` 的 `motion`）。
+- `machine.limits`：「行程与安全」中的纸张范围、Z 范围、机器行程和波特率，按工作区记住。发送前的安全确认不保存，每次都要重新勾选。
+- `machine.presets`：本工作区保存的机型预设（最多 50 个）。内置预设（通用 GRBL Z 轴、两种舵机）不写入文件。
 
 ## `名称.wtl`（稿件链接）
 
@@ -47,8 +57,10 @@
 
 - `text` / `gcode`：同一文件夹中的文件名（不能含路径）。重命名或移动稿件时三个文件一起改。
 - `settings` / `motion` / `glyphs`：生成 G-code 用到的全部参数（排版、笔轴、笔起点、页码、选字，见 [glyph-format.md](glyph-format.md)）。
+- `settings.natural`（`on` / `off`）及 `natural-size`、`natural-baseline`、`natural-spacing`、`natural-join`（%），`natural-slant`、`natural-slant-var`（°），`natural-seed`：拟真笔迹。同一种子的结果完全相同。
+- `motion.pen-mode`：`z`（Z 轴，用 `pen-up` / `pen-down`），`servo-m5`（`M3 S<servo-down>` 落笔，`M5` 抬笔），`servo-s`（`M3 S<servo-down>` / `M3 S<servo-up>`）；`pen-delay` 为舵机每次抬落笔后的 `G4 P` 等待秒数。
 - `drawing`（可选）：同一文件夹中的 `.svg` / `.dxf`，以及它在纸上的位置（`x` / `y` 为左上角距纸边 mm，`width` 为宽度 mm，`page` 为所在页）。图形文件的内容也计入梳串。
-- `style`（可选）：在纯文本之上的格式层。`runs` 是码点区间 `[from, to)` 的字号（mm）或用笔；`paras` 是段落起点 `at` 的对齐（`center` / `right`）和首行缩进（mm）。正文被编辑时，格式随文字平移。正文中的 `\( … \)` 是公式（LaTeX 写法）。格式也计入梳串。
+- `style`（可选）：在纯文本之上的格式层。`runs` 是码点区间 `[from, to)` 的字号（mm）、用笔、`underline`、`strike`（`true`）和 `script`（`sup` / `sub`）；`paras` 是段落起点 `at` 的对齐（`center` / `right`）、首行缩进（mm）、行距倍数 `spacing`（1–3）和列表 `list`（`bullet` / `number`，连续的编号段落依次编号）。正文被编辑时，格式随文字平移。正文中的 `\( … \)` 是公式（LaTeX 写法）。格式也计入梳串。
 - `motion.text-pen` / `motion.pen`：正文用哪支笔、当前生成哪支笔（`all` 表示不换笔）。
 - `view`：只在第一次打开时作为默认视图；之后每台设备自己记住看的是哪一页，切换视图不会改写文件。
 - `sync`：上次「正文、参数、程序三者一致」时各自的哈希值，以及程序来源：`generated` 表示生成器输出，`manual` 表示手动编辑或导入的程序。

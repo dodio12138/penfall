@@ -3,6 +3,7 @@
 (function (root) {
   'use strict';
   const Glyphs = typeof module !== 'undefined' && module.exports ? require('./glyphs.js') : root.Glyphs;
+  const Machines = typeof module !== 'undefined' && module.exports ? require('./machines.js') : root.Machines;
   const LINK_FORMAT = 'penfall/link';
   const WORKSPACE_FORMAT = 'penfall/workspace';
   const ARCHIVE_FORMAT = 'penfall/workspace-archive';
@@ -62,7 +63,16 @@
 
   // --- Rich formatting overlay on the plain text (kept in the .wtl, like pins) ---
   const ALIGNS = ['left', 'center', 'right'];
-  /** runs: [{ from, to, size?, pen? }] (code point ranges); paras: [{ at, align?, indent? }] (paragraph start). */
+  const SCRIPTS = ['sup', 'sub'];
+  const LISTS = ['bullet', 'number'];
+  const RUN_KEYS = ['size', 'pen', 'underline', 'strike', 'script'];
+  const PARA_KEYS = ['align', 'indent', 'spacing', 'list'];
+  const hasRun = (run) => RUN_KEYS.some((key) => run[key] !== undefined);
+  const sameRun = (a, b) => RUN_KEYS.every((key) => a[key] === b[key]);
+  /**
+   * runs: [{ from, to, size?, pen?, underline?, strike?, script? }] (code point ranges);
+   * paras: [{ at, align?, indent?, spacing?, list? }] (paragraph start).
+   */
   function normalizeFormat(raw) {
     const value = raw && typeof raw === 'object' ? raw : {};
     const runs = (Array.isArray(value.runs) ? value.runs : []).slice(0, 20000).flatMap((run) => {
@@ -70,7 +80,10 @@
       const clean = { from: run.from, to: run.to };
       if (Number.isFinite(run.size) && run.size >= 1 && run.size <= 80) clean.size = run.size;
       if (Number.isInteger(run.pen) && run.pen >= 1 && run.pen <= 8) clean.pen = run.pen;
-      return clean.size || clean.pen ? [clean] : [];
+      if (run.underline === true) clean.underline = true;
+      if (run.strike === true) clean.strike = true;
+      if (SCRIPTS.includes(run.script)) clean.script = run.script;
+      return hasRun(clean) ? [clean] : [];
     }).sort((a, b) => a.from - b.from);
     const seen = new Set();
     const paras = (Array.isArray(value.paras) ? value.paras : []).slice(0, 20000).flatMap((para) => {
@@ -78,7 +91,9 @@
       const clean = { at: para.at };
       if (ALIGNS.includes(para.align) && para.align !== 'left') clean.align = para.align;
       if (Number.isFinite(para.indent) && para.indent > 0 && para.indent <= 100) clean.indent = para.indent;
-      if (!clean.align && !clean.indent) return [];
+      if (Number.isFinite(para.spacing) && para.spacing > 1 && para.spacing <= 3) clean.spacing = para.spacing;
+      if (LISTS.includes(para.list)) clean.list = para.list;
+      if (!PARA_KEYS.some((key) => clean[key] !== undefined)) return [];
       seen.add(para.at);
       return [clean];
     }).sort((a, b) => a.at - b.at);
@@ -126,12 +141,12 @@
       const next = { ...run };
       for (const [key, value] of Object.entries(attrs)) { if (value === null || value === undefined) delete next[key]; else next[key] = value; }
       return next;
-    }).filter((run) => run.size || run.pen).sort((a, b) => a.from - b.from);
+    }).filter(hasRun).sort((a, b) => a.from - b.from);
     // Merge neighbours with identical attributes.
     const merged = [];
     for (const run of runs) {
       const last = merged.at(-1);
-      if (last && last.to === run.from && last.size === run.size && last.pen === run.pen) last.to = run.to; else merged.push({ ...run });
+      if (last && last.to === run.from && sameRun(last, run)) last.to = run.to; else merged.push({ ...run });
     }
     return { runs: merged, paras: style.paras };
   }
@@ -148,8 +163,8 @@
     const paras = new Map(style.paras.map((para) => [para.at, { ...para }]));
     for (const at of starts) {
       const next = { ...(paras.get(at) || { at }) };
-      for (const [key, value] of Object.entries(attrs)) { if (value === null || value === undefined || value === 'left' || value === 0) delete next[key]; else next[key] = value; }
-      if (next.align || next.indent) paras.set(at, next); else paras.delete(at);
+      for (const [key, value] of Object.entries(attrs)) { if (value === null || value === undefined || value === 'left' || value === 0 || (key === 'spacing' && value <= 1)) delete next[key]; else next[key] = value; }
+      if (PARA_KEYS.some((key) => next[key] !== undefined)) paras.set(at, next); else paras.delete(at);
     }
     return { runs: style.runs, paras: [...paras.values()].sort((a, b) => a.at - b.at) };
   }
@@ -215,7 +230,8 @@
     const machine = value.machine && typeof value.machine === 'object' ? value.machine : {};
     const penWidth = Number.isFinite(machine.penWidth) && machine.penWidth >= .05 && machine.penWidth <= 5 ? machine.penWidth : .5;
     const pens = (Array.isArray(machine.pens) ? machine.pens : DEFAULT_PENS).filter((pen) => pen && typeof pen.name === 'string' && /^#[0-9a-f]{6}$/i.test(pen.color || '')).slice(0, 8).map((pen) => ({ name: pen.name.trim().slice(0, 12) || '笔', color: pen.color.toLowerCase() }));
-    return { format: WORKSPACE_FORMAT, version: 1, machine: { penWidth, pens: pens.length ? pens : DEFAULT_PENS.map((pen) => ({ ...pen })) } };
+    // 机型: applied preset, motion defaults for new drafts, paper range / travel, and this workspace's presets.
+    return { format: WORKSPACE_FORMAT, version: 1, machine: { penWidth, pens: pens.length ? pens : DEFAULT_PENS.map((pen) => ({ ...pen })), ...Machines.normalizeMachine(machine) } };
   }
 
   /**
@@ -277,7 +293,7 @@
     return { format: ARCHIVE_FORMAT, version: 1, name: typeof raw.name === 'string' ? raw.name.slice(0, 120) : '', dirs, files };
   }
 
-  const api = { normalizeFormat, shiftFormat, applyRun, applyParagraph, paragraphStarts, inputHash, LINK_FORMAT, WORKSPACE_FORMAT, ARCHIVE_FORMAT, MANIFEST, TEXT_TYPES, CODE_TYPES, DRAWING_TYPES, DEFAULT_PENS, FILE_TYPES, dirname, basename, extname, stem, join, validPart, validPath, nameError, uniqueStem, hash, paramsHash, normalizeLink, serializeLink, markSynced, analyzeSync, normalizeManifest, buildTree, documentFor, normalizeArchive };
+  const api = { RUN_KEYS, PARA_KEYS, normalizeFormat, shiftFormat, applyRun, applyParagraph, paragraphStarts, inputHash, LINK_FORMAT, WORKSPACE_FORMAT, ARCHIVE_FORMAT, MANIFEST, TEXT_TYPES, CODE_TYPES, DRAWING_TYPES, DEFAULT_PENS, FILE_TYPES, dirname, basename, extname, stem, join, validPart, validPath, nameError, uniqueStem, hash, paramsHash, normalizeLink, serializeLink, markSynced, analyzeSync, normalizeManifest, buildTree, documentFor, normalizeArchive };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Links = api;
 })(typeof window !== 'undefined' ? window : globalThis);

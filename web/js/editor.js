@@ -3,8 +3,11 @@
 const LEGACY_DRAFT_KEYS = ['web-typewriter:workspace:v2', 'web-typewriter:draft:v1'];
 const title = $('#title');
 const content = $('#content');
-const settings = ['paper', 'orientation', 'font', 'font-size', 'line-gap', 'letter-gap', 'margin', 'gutter', 'bg-kind', 'bg-cell', 'bg-gap', 'bg-write', 'bg-pen'];
-const defaults = { paper: 'a4', orientation: 'portrait', font: 'serif', 'font-size': '5', 'line-gap': '3', 'letter-gap': '1', margin: '20', gutter: '0', 'bg-kind': 'none', 'bg-cell': '10', 'bg-gap': '0', 'bg-write': 'no', 'bg-pen': '1' };
+// 拟真笔迹 (natural handwriting) parameters live with the layout settings of the draft.
+const NATURAL_SETTINGS = ['natural', 'natural-size', 'natural-baseline', 'natural-spacing', 'natural-slant', 'natural-slant-var', 'natural-join', 'natural-seed'];
+const NATURAL_DEFAULTS = { natural: 'off', 'natural-size': '8', 'natural-baseline': '6', 'natural-spacing': '12', 'natural-slant': '0', 'natural-slant-var': '3', 'natural-join': '0', 'natural-seed': '1' };
+const settings = ['paper', 'orientation', 'font', 'font-size', 'line-gap', 'letter-gap', 'margin', 'gutter', 'bg-kind', 'bg-cell', 'bg-gap', 'bg-write', 'bg-pen', ...NATURAL_SETTINGS];
+const defaults = { paper: 'a4', orientation: 'portrait', font: 'serif', 'font-size': '5', 'line-gap': '3', 'letter-gap': '1', margin: '20', gutter: '0', 'bg-kind': 'none', 'bg-cell': '10', 'bg-gap': '0', 'bg-write': 'no', 'bg-pen': '1', ...NATURAL_DEFAULTS };
 const PAPER_SIZES = { a4: [210, 297], a5: [148, 210] };
 const PREVIEW_PX_PER_MM = 2.5;
 const ORIGIN_DEFAULTS = { 'origin-corner': 'bottom-left', 'origin-x': '0', 'origin-y': '0', 'x-dir': '1', 'y-dir': '1' };
@@ -82,6 +85,7 @@ function updateCursor() {
   $('#cursor').textContent = `行 ${before.length}，列 ${Array.from(before.at(-1)).length + 1}`;
 }
 function updateEditor() {
+  updatePageStatus();
   $('#count').textContent = `${Array.from(content.value.replace(/\s/g, '')).length} 字`;
   renderLineNumbers($('#line-numbers'), content);
   updateCursor();
@@ -154,28 +158,44 @@ function usedPens(page) {
   return [...pens].sort((a, b) => a - b);
 }
 
-/** Same layout as the generator (PathEngine.layoutText); characters without a glyph use system-font widths. */
-function makeLayout() {
+/** 拟真 options for PathEngine.layoutText (null when off). Percent / degree fields → fractions / degrees. */
+function naturalOptions(c = config()) {
+  if (c.natural !== 'on') return null;
+  const pct = (id) => Number(c[id]) / 100;
+  return { size: pct('natural-size'), baseline: pct('natural-baseline'), spacing: pct('natural-spacing'), join: pct('natural-join'), slant: Number(c['natural-slant']), slantVar: Number(c['natural-slant-var']), seed: Number(c['natural-seed']) };
+}
+/**
+ * Layout options shared by the paper preview and the generator (format, formulas, ruling, 拟真), so both place
+ * every stroke identically. preview: use the glyph library being previewed in the 字形 panel.
+ */
+function layoutOptions({ preview = false } = {}) {
   const c = config();
   let [width, height] = PAPER_SIZES[c.paper];
   if (c.orientation === 'landscape') [width, height] = [height, width];
   const size = Number(c['font-size']);
+  const background = { kind: c['bg-kind'], cell: Number(c['bg-cell']), gap: Number(c['bg-gap']) };
+  const gridPaper = PathEngine.GRID_BACKGROUNDS.includes(background.kind);
+  const lined = ['lines', 'four-line'].includes(background.kind);
+  const mathGlyph = mathGlyphFor({ preview });
+  return { format: textStyle, math: (source, mathSize) => MathLayout.layout(source, mathSize, mathGlyph), marker: mathGlyph, natural: naturalOptions(c), width, height, margin: Number(c.margin), gutter: Number(c.gutter), size, gap: Number(c['letter-gap']), lineGap: Number(c['line-gap']), grid: gridPaper ? { cell: background.cell, gap: background.kind === 'composition' ? background.gap : 0 } : null, pitch: lined ? Math.max(background.cell, size * (background.kind === 'four-line' ? 4 / 3 : 1)) : 0, background };
+}
+/** Same layout as the generator (PathEngine.layoutText); characters without a glyph use system-font widths. */
+function makeLayout() {
+  const c = config();
+  const options = layoutOptions({ preview: true });
+  const { width, height, size, background } = options;
   const context = $('#preview').getContext('2d');
   context.font = `${size}px ${c.font}`;
   const widths = new Map();
   const fallbackAdvance = (char) => { if (!widths.has(char)) widths.set(char, context.measureText(char).width); return widths.get(char); };
-  const background = { kind: c['bg-kind'], cell: Number(c['bg-cell']), gap: Number(c['bg-gap']) };
-  const gridPaper = PathEngine.GRID_BACKGROUNDS.includes(background.kind);
-  const lined = ['lines', 'four-line'].includes(background.kind);
-  const mathGlyph = mathGlyphFor();
-  const options = { format: textStyle, math: (source, mathSize) => MathLayout.layout(source, mathSize, mathGlyph), width, height, margin: Number(c.margin), gutter: Number(c.gutter), size, gap: Number(c['letter-gap']), lineGap: Number(c['line-gap']), grid: gridPaper ? { cell: background.cell, gap: background.kind === 'composition' ? background.gap : 0 } : null, pitch: lined ? Math.max(background.cell, size * (background.kind === 'four-line' ? 4 / 3 : 1)) : 0 };
+  const lined = options.pitch > 0;
   const result = PathEngine.layoutText(content.value, options, glyphResolver({ preview: true }), fallbackAdvance);
   const placement = drawingPlacement();
   const paths = placement ? Drawing.placePaths(drawingState.model, placement, penList()) : [];
   const pages = Math.max(result.pages, placement?.page || 1);
   // Ruling matches the text rows / cells; with 用笔画出 it is written like a drawing with its own pen.
   const ruling = PathEngine.backgroundPaths({ ...background, cell: lined ? options.pitch : background.cell }, options, pages);
-  return { width, height, margin: Number(c.margin), gutter: Number(c.gutter), size, font: c.font, paper: c.paper, orientation: c.orientation, placements: result.placements, glyphs: result.placements, carets: result.carets, formulaErrors: result.formulaErrors, paths, background: ruling, backgroundWritten: c['bg-write'] === 'yes' && ruling.length > 0, layoutOptions: options, missing: result.missing, overflow: result.overflow, pages };
+  return { width, height, margin: Number(c.margin), gutter: Number(c.gutter), size, font: c.font, paper: c.paper, orientation: c.orientation, placements: result.placements, glyphs: result.placements, strokes: PathEngine.textStrokes(result), carets: result.carets, formulaErrors: result.formulaErrors, paths, background: ruling, backgroundWritten: c['bg-write'] === 'yes' && ruling.length > 0, layoutOptions: options, missing: result.missing, overflow: result.overflow, pages };
 }
 /** Pages included in the current writing set (all / odd / even), in order. */
 function pageSet() {
@@ -204,7 +224,17 @@ function stepPage(direction) {
   const next = pages[index + direction];
   if (next) setPage(next);
 }
+/** Status bar: page of the caret on the paper view, else the previewed / generated page. */
+function updatePageStatus() {
+  const item = $('#page-status');
+  if (!item) return;
+  const pages = layout.pages || 1;
+  const caretPage = !$('#preview-view').hidden ? currentPage() : layout.carets?.[Array.from(content.value.slice(0, content.selectionStart)).length]?.page || currentPage();
+  item.textContent = `第 ${caretPage} 页，共 ${pages} 页`;
+  item.hidden = !window.Workspace?.activeId || $('.main-area').classList.contains('gcode-only');
+}
 function updatePagers() {
+  updatePageStatus();
   const page = currentPage(), pages = layout.pages || 1, set = pageSet(), index = set.indexOf(page);
   const label = $('#page-set').value === 'all' ? `第 ${page} / ${pages} 页` : `第 ${page} 页 · ${$('#page-set').value === 'odd' ? '奇数页' : '偶数页'} ${index + 1}/${set.length}`;
   for (const pager of $$('.pager')) {
@@ -244,6 +274,14 @@ function updateLayoutInfo() {
   updateOriginSummary();
   if (typeof updatePenPicker === 'function') updatePenPicker();
   if (typeof updateBackgroundFields === 'function') updateBackgroundFields();
+  if (typeof updatePenFields === 'function') updatePenFields();
+  updateNaturalFields();
+}
+/** 拟真 parameters are shown only while it is on; the pane header shows the state. */
+function updateNaturalFields() {
+  const on = $('#natural').value === 'on';
+  $('#natural-fields').hidden = !on;
+  $('#natural-state').textContent = on ? '开' : '关';
 }
 function previewZoom(stage) {
   const choice = $('#zoom').value;
@@ -293,12 +331,22 @@ function renderPreview() {
   const pinned = new Set(glyphSelection.pins.map((pin) => pin.at));
   const page = currentPage();
   const textPen = Number($('#text-pen').value) || 1;
+  // Exactly the strokes the generator writes (拟真 variation, 连笔, list numbers, underlines…), in the real pen width.
+  ctx.lineWidth = window.Workspace?.penWidth || .5;
+  for (const stroke of layout.strokes || []) {
+    if (stroke.page !== page) continue;
+    ctx.strokeStyle = penColor(stroke.pen || textPen);
+    ctx.beginPath(); ctx.moveTo(...stroke.points[0]);
+    if (stroke.points.length === 1) ctx.lineTo(stroke.points[0][0] + .01, stroke.points[0][1]);
+    for (const point of stroke.points.slice(1)) ctx.lineTo(...point);
+    ctx.stroke();
+  }
   for (const item of glyphs) {
     if (item.page !== page) continue;
     if (item.kind === 'formula') {
-      ctx.strokeStyle = item.box.error ? '#c2410c' : penColor(item.pen || textPen);
-      ctx.lineWidth = window.Workspace?.penWidth || .5;
-      for (const points of item.box.error ? item.box.placeholder : item.box.strokes) {
+      if (!item.box.error) continue;
+      ctx.strokeStyle = '#c2410c';
+      for (const points of item.box.placeholder) {
         ctx.beginPath(); ctx.moveTo(item.x + points[0][0], item.y + points[0][1]);
         if (points.length === 1) ctx.lineTo(item.x + points[0][0] + .01, item.y + points[0][1]);
         for (const [px, py] of points.slice(1)) ctx.lineTo(item.x + px, item.y + py);
@@ -313,16 +361,6 @@ function renderPreview() {
       ctx.fillText(item.char, item.x, item.y);
       continue;
     }
-    const scale = (item.size || size) / item.glyph.unitsPerEm;
-    ctx.strokeStyle = ctx.fillStyle = penColor(item.pen || textPen);
-    ctx.lineWidth = window.Workspace?.penWidth || .5; // real pen width in mm
-    ctx.beginPath();
-    for (const stroke of item.glyph.strokes) {
-      ctx.moveTo(item.x + stroke[0][0] * scale, item.y + stroke[0][1] * scale);
-      if (stroke.length === 1) ctx.lineTo(item.x + stroke[0][0] * scale + .01, item.y + stroke[0][1] * scale);
-      for (const point of stroke.slice(1)) ctx.lineTo(item.x + point[0] * scale, item.y + point[1] * scale);
-    }
-    ctx.stroke();
     if (pinned.has(item.index)) {
       ctx.fillStyle = '#1766aa';
       ctx.fillRect(item.x, item.y + (item.size || size) + .6, item.width, .4);
@@ -417,7 +455,18 @@ $('.view-tabs').addEventListener('keydown', (event) => {
   tabs[index].click();
   tabs[index].focus();
 });
-$('#zoom').addEventListener('change', renderPreview);
+// Paper zoom: fits the page width by default (like a word processor); the choice is remembered on this device.
+try { const zoom = localStorage.getItem('penfall:paper-zoom'); if (zoom && [...$('#zoom').options].some((option) => option.value === zoom)) $('#zoom').value = zoom; } catch { /* optional */ }
+$('#natural').addEventListener('input', updateNaturalFields);
+// A new seed = another reproducible handwriting; it counts as a layout change (regenerates generated programs).
+$('#natural-reshuffle').addEventListener('click', () => {
+  const field = $('#natural-seed');
+  let seed;
+  do seed = Math.floor(Math.random() * 1e6) + 1; while (String(seed) === field.value);
+  field.value = String(seed);
+  field.dispatchEvent(new Event('input', { bubbles: true }));
+});
+$('#zoom').addEventListener('change', () => { try { localStorage.setItem('penfall:paper-zoom', $('#zoom').value); } catch { /* optional */ } renderPreview(); });
 for (const pager of $$('.pager')) {
   pager.querySelector('.pager-prev').addEventListener('click', () => stepPage(-1));
   pager.querySelector('.pager-next').addEventListener('click', () => stepPage(1));

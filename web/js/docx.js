@@ -98,6 +98,15 @@
         styles.set(attr(style, 'styleId'), { heading: level ? Number(level[1] || level[2]) : 0, size: Number(attr(child(rPr, W, 'sz'), 'val')) || 0, align: attr(child(pPr, W, 'jc'), 'val') });
       }
     }
+    // Numbering: numId → bullet or numbered list (format of the first level).
+    const lists = new Map();
+    const numberingXml = await read('word/numbering.xml');
+    if (numberingXml) {
+      const ndoc = parser.parseFromString(numberingXml, 'application/xml');
+      const abstract = new Map([...ndoc.getElementsByTagNameNS(W, 'abstractNum')].map((node) => [attr(node, 'abstractNumId'), attr(child(child(node, W, 'lvl'), W, 'numFmt'), 'val')]));
+      for (const num of ndoc.getElementsByTagNameNS(W, 'num')) lists.set(attr(num, 'numId'), abstract.get(attr(child(num, W, 'abstractNumId'), 'val')) === 'bullet' ? 'bullet' : 'number');
+    }
+    const on = (node) => Boolean(node) && !['false', '0', 'none'].includes(attr(node, 'val'));
     const body = doc.getElementsByTagNameNS(W, 'body')[0];
     const chars = [], runs = [], paras = [], warnings = new Set();
     const sizeCount = new Map();
@@ -129,9 +138,11 @@
           const rPr = child(item, W, 'rPr');
           const sizeHalf = Number(attr(child(rPr, W, 'sz'), 'val')) || paraStyle?.size || defaultSize;
           const pen = colorPen(attr(child(rPr, W, 'color'), 'val'));
+          const vertical = attr(child(rPr, W, 'vertAlign'), 'val');
+          const effects = { underline: on(child(rPr, W, 'u')) || undefined, strike: on(child(rPr, W, 'strike')) || on(child(rPr, W, 'dstrike')) || undefined, script: vertical === 'superscript' ? 'sup' : vertical === 'subscript' ? 'sub' : undefined };
           for (const part of item.childNodes) {
             if (part.namespaceURI !== W) continue;
-            if (part.localName === 't') push(part.textContent, { sizeHalf, pen });
+            if (part.localName === 't') push(part.textContent, { sizeHalf, pen, ...effects });
             else if (part.localName === 'tab') push('\t', { sizeHalf });
             else if (part.localName === 'br' || part.localName === 'cr') push('\n', null);
             else if (part.localName === 'drawing' || part.localName === 'pict') warnings.add('图片未导入（可另存为 SVG 后作为图形添加）');
@@ -152,7 +163,13 @@
       if (jc === 'center') para.align = 'center'; else if (jc === 'right' || jc === 'end') para.align = 'right';
       if (firstLine || firstChars) para.indent = firstLine ? firstLine * TWIP_MM : firstChars / 100;
       if (style?.heading && !para.align && style.heading === 1) para.align = 'center';
-      if (para.align || para.indent) paras.push(para);
+      const numId = attr(child(child(pPr, W, 'numPr'), W, 'numId'), 'val');
+      if (numId && numId !== '0') { para.list = lists.get(numId) || 'number'; delete para.indent; }
+      // Line spacing in 240ths of a line (lineRule auto) → 1.5 / 2 / 2.5 / 3.
+      const spacing = child(pPr, W, 'spacing');
+      const line = Number(attr(spacing, 'line')) || 0;
+      if (line && (attr(spacing, 'lineRule') || 'auto') === 'auto' && line / 240 >= 1.25) para.spacing = Math.min(3, Math.round(line / 240 * 2) / 2);
+      if (para.align || para.indent || para.list || para.spacing) paras.push(para);
     }
     for (const node of body.childNodes) {
       if (node.namespaceURI !== W) continue;
@@ -189,12 +206,15 @@
     const baseMm = Math.round(baseHalf / 2 * PT_MM * 2) / 2;
     settings['font-size'] = String(Math.min(15, Math.max(2, baseMm)));
     const style = {
-      runs: runs.map(({ from, to, sizeHalf, pen }) => {
+      runs: runs.map(({ from, to, sizeHalf, pen, underline, strike, script }) => {
         const run = { from, to };
         if (sizeHalf && sizeHalf !== baseHalf) run.size = Math.round(sizeHalf / 2 * PT_MM * 10) / 10;
         if (pen) run.pen = pen;
+        if (underline) run.underline = true;
+        if (strike) run.strike = true;
+        if (script) run.script = script;
         return run;
-      }).filter((run) => run.size || run.pen),
+      }).filter((run) => Object.keys(run).length > 2),
       paras,
     };
     return { text: chars.join(''), style, settings, warnings: [...warnings] };

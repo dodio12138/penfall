@@ -5,15 +5,54 @@
   const defaultResolver = () => Glyphs.createResolver(Glyphs.DEFAULT_SELECTION, new Map([[Glyphs.BUILTIN_ID, Glyphs.builtinLibrary()]]));
   const WHITESPACE_ADVANCE = .7; // × font size, matches the built-in Latin advance.
   const MAX_PAGES = 99;
+  const SCRIPT = { sup: { scale: .6, shift: -.38 }, sub: { scale: .6, shift: .18 } }; // × the run's font size
+  const LIST_HANG = 2; // list marker column, × base font size
+  // 连笔 only between Latin letters / digits: joined 楷书 characters or punctuation look like stray strokes.
+  const JOINABLE = /^[\p{Script=Latin}\p{N}]$/u;
+
+  // --- 拟真 (natural handwriting): reproducible per-character variation from a seed. ---
+  /** Deterministic noise in [-1, 1) for (seed, index, channel). */
+  function noise(seed, index, channel) {
+    let h = (seed ^ Math.imul(index + 1, 0x9e3779b1) ^ Math.imul(channel + 1, 0x85ebca6b)) >>> 0;
+    h = Math.imul(h ^ (h >>> 16), 0x7feb352d); h = Math.imul(h ^ (h >>> 15), 0x846ca68b); h ^= h >>> 16;
+    return (h >>> 0) / 4294967296 * 2 - 1;
+  }
+  /** Slowly drifting noise (a baseline wanders over a few characters instead of jumping). */
+  function drift(seed, index, channel, period = 5) {
+    const at = index / period, i = Math.floor(at), t = at - i, s = t * t * (3 - 2 * t);
+    return noise(seed, i, channel) * (1 - s) + noise(seed, i + 1, channel) * s;
+  }
+  /**
+   * natural = { size, baseline, spacing (fractions of the font size), slant / slantVar (degrees), join (0–1), seed }.
+   * Returns null when off, else vary(index, size) → { scale, dy, tilt (tan of slant), extra (advance, mm) } and join(index).
+   */
+  function naturalVariation(natural) {
+    if (!natural) return null;
+    const clamp = (value, max) => Math.max(0, Math.min(max, Number(value) || 0));
+    const size = clamp(natural.size, .5), baseline = clamp(natural.baseline, .5), spacing = clamp(natural.spacing, 1), slantVar = clamp(natural.slantVar, 30), join = clamp(natural.join, 1);
+    const slant = Math.max(-30, Math.min(30, Number(natural.slant) || 0));
+    const seed = (Number(natural.seed) >>> 0) || 1;
+    return {
+      vary: (index, fontSize) => ({
+        scale: 1 + size * noise(seed, index, 1),
+        dy: baseline * fontSize * (drift(seed, index, 2) * .7 + noise(seed, index, 3) * .3),
+        tilt: Math.tan((slant + slantVar * (drift(seed, index, 4, 7) * .5 + noise(seed, index, 5) * .5)) * Math.PI / 180),
+        extra: spacing * fontSize * .5 * noise(seed, index, 6),
+      }),
+      join: (index) => join > 0 && (noise(seed, index, 7) + 1) / 2 < join,
+    };
+  }
 
   /**
    * Shared by the paper preview and the generator so both place every character identically.
    * resolve(index, char) → glyph | null; fallbackAdvance(char) → mm width (at the base size) for characters without a glyph.
    * Indexes are Unicode code point positions in the original text (used by pins and formatting).
    *
-   * options.format = { runs: [{ from, to, size?, pen? }], paras: [{ at, align?, indent? }] }  (optional rich formatting)
+   * options.format = { runs: [{ from, to, size?, pen?, underline?, strike?, script? }], paras: [{ at, align?, indent?, spacing?, list? }] }
    * options.math(source, size, index) → { width, height, depth, strokes } lays out \( … \) formulas (optional).
-   * Returns placements (glyphs and formulas), carets (one per index, for editing on the paper), missing, overflow, pages.
+   * options.natural → 拟真 variation (see naturalVariation); options.marker(char) → glyph for list numbers.
+   * Returns placements (glyphs and formulas), decorations (underline / strike / bullets, pen paths), carets (one per
+   * index, for editing on the paper), missing, overflow, pages. textStrokes() turns them into pen strokes.
    */
   function layoutText(text, options, resolve = defaultResolver(), fallbackAdvance = () => options.size * WHITESPACE_ADVANCE) {
     const { width, height, margin, size: baseSize, gap, lineGap } = options;
@@ -24,10 +63,18 @@
     const bottom = height - margin;
     const chars = Array.from(text);
     const count = chars.length;
-    const placements = [], missing = new Set(), carets = new Array(count + 1), formulaErrors = [];
-    // Per-character size / pen from formatting runs; per-paragraph alignment / indent.
-    const sizes = new Float64Array(count).fill(baseSize), pens = new Int8Array(count);
-    for (const run of options.format?.runs || []) for (let i = Math.max(0, run.from); i < Math.min(count, run.to); i++) { if (run.size > 0) sizes[i] = run.size; if (run.pen > 0) pens[i] = run.pen; }
+    const placements = [], decorations = [], missing = new Set(), carets = new Array(count + 1), formulaErrors = [];
+    // Per-character size / pen / decoration from formatting runs; per-paragraph alignment / indent / spacing / list.
+    const sizes = new Float64Array(count).fill(baseSize), pens = new Int8Array(count), lines = new Uint8Array(count), scripts = new Array(count);
+    for (const run of options.format?.runs || []) for (let i = Math.max(0, run.from); i < Math.min(count, run.to); i++) {
+      if (run.size > 0) sizes[i] = run.size;
+      if (run.pen > 0) pens[i] = run.pen;
+      if (run.underline) lines[i] |= 1;
+      if (run.strike) lines[i] |= 2;
+      if (SCRIPT[run.script]) scripts[i] = SCRIPT[run.script];
+    }
+    const natural = naturalVariation(options.natural);
+    const marker = options.marker || ((char) => resolve(-1, char));
     const paragraphs = new Map((options.format?.paras || []).map((para) => [para.at, para]));
     // \( … \) formulas (same line), laid out as one atomic box.
     const formulas = new Map();
@@ -59,22 +106,27 @@
           page++; x = left(page); top = margin;
         }
         carets[index] = { page, x, y: top, height: grid.cell };
-        const w = widthOf(char, glyph, size);
-        if (!blank) placements.push({ index, char, x: x + (grid.cell - w) / 2, y: top + (grid.cell - size) / 2, page, width: w, size, pen: pens[index], glyph });
+        const v = natural && glyph ? natural.vary(index, size) : null;
+        const drawn = v ? Math.min(grid.cell, size * v.scale) : size, w = widthOf(char, glyph, drawn);
+        if (!blank) placements.push({ index, char, x: x + (grid.cell - w) / 2 + (v ? v.extra * .3 : 0), y: top + (grid.cell - size) / 2 + (size - drawn) + (v ? v.dy * .5 : 0), page, width: w, size: drawn, pen: pens[index], glyph, ...(v ? { tilt: v.tilt } : {}) });
         x += grid.cell;
       }
       carets[count] = carets[count] || { page, x, y: top, height: grid.cell };
-      return { placements, carets, missing: [...missing], overflow, pages: page };
+      return { placements, decorations, carets, missing: [...missing], overflow, pages: page };
     }
 
     // Flowing text: 1) break each paragraph into rows, 2) place rows (baseline, alignment, pages).
     const pitch = options.pitch > 0 ? options.pitch : 0;
-    let start = 0;
+    let start = 0, listNumber = 0;
     while (start <= count && !overflow) {
       let end = start;
       while (end < count && chars[end] !== '\n') end++;
       const para = paragraphs.get(start) || {};
-      const indent = para.indent > 0 ? para.indent : 0;
+      // Lists hang their marker in a column left of the text; numbering continues over consecutive numbered paragraphs.
+      const list = para.list === 'bullet' || para.list === 'number' ? para.list : null;
+      listNumber = list === 'number' ? listNumber + 1 : 0;
+      const hang = list ? LIST_HANG * baseSize : 0;
+      const indent = list ? 0 : para.indent > 0 ? para.indent : 0;
       const items = [];
       for (let index = start; index < end; index++) {
         const formula = formulas.get(index);
@@ -82,23 +134,25 @@
           const box = options.math(formula.source, sizes[index], index);
           for (const char of box.missing || []) missing.add(char);
           if (box.error) formulaErrors.push({ index, source: formula.source, message: box.error });
-          items.push({ kind: 'formula', index, end: formula.end, width: box.width, ascent: box.height, descent: box.depth, size: sizes[index], pen: pens[index], box });
+          items.push({ kind: 'formula', index, end: formula.end, width: box.width, ascent: box.height, descent: box.depth, size: sizes[index], pen: pens[index], lines: lines[index], box });
           index = formula.end - 1;
           continue;
         }
         const char = chars[index];
         if (char === '\r') continue;
-        const blank = /\s/.test(char), size = sizes[index];
+        const blank = /\s/.test(char), base = sizes[index], script = scripts[index];
         const glyph = blank ? null : resolve(index, char);
         if (!blank && !glyph) missing.add(char);
-        items.push({ kind: blank ? 'blank' : 'char', index, char, glyph, width: widthOf(char, glyph, size), ascent: size, descent: 0, size, pen: pens[index] });
+        const v = natural && glyph ? natural.vary(index, base) : null;
+        const size = base * (script ? script.scale : 1) * (v ? v.scale : 1), shift = script ? script.shift * base : 0;
+        items.push({ kind: blank ? 'blank' : 'char', index, char, glyph, width: widthOf(char, glyph, size), extra: v ? Math.max(-gap - base * .1, v.extra) : 0, ascent: Math.max(base * (script ? script.scale : 1) - shift, base * (script ? 0 : 1)), descent: Math.max(0, shift), size, shift: shift + (v ? v.dy : 0), tilt: v ? v.tilt : 0, lines: lines[index], pen: pens[index], join: Boolean(v && natural.join(index)) });
       }
       const rows = [];
-      let row = [], x = 0, limit = available - indent;
+      let row = [], x = 0, limit = available - indent - hang;
       for (const item of items) {
-        if (x + item.width > limit + 1e-9 && row.length) { rows.push(row); row = []; x = 0; limit = available; }
+        if (x + item.width > limit + 1e-9 && row.length) { rows.push(row); row = []; x = 0; limit = available - hang; }
         row.push({ item, x });
-        x += item.width + gap;
+        x += item.width + gap + (item.extra || 0);
       }
       rows.push(row);
       rows.forEach((cells, number) => {
@@ -113,29 +167,117 @@
         }
         const last = cells.at(-1);
         const rowWidth = last ? last.x + last.item.width : 0;
-        const space = (number === 0 ? available - indent : available) - rowWidth;
-        const offset = (number === 0 ? indent : 0) + (para.align === 'center' ? space / 2 : para.align === 'right' ? space : 0);
+        const space = (number === 0 ? available - indent : available) - hang - rowWidth;
+        const offset = hang + (number === 0 ? indent : 0) + (para.align === 'center' ? space / 2 : para.align === 'right' ? space : 0);
         const baseline = top + ascent, origin = left(page) + offset;
+        if (number === 0 && list) addMarker(list, listNumber, left(page), hang, baseline, page, cells[0]?.item.pen ?? pens[start] ?? 0);
+        let previous = null;
         for (const { item, x: cellX } of cells) {
           const x0 = origin + cellX;
           const caret = { page, x: x0, y: top, height: rowHeight };
+          item.x0 = x0;
           if (item.kind === 'formula') {
             for (let i = item.index; i < item.end; i++) carets[i] = caret;
             placements.push({ kind: 'formula', index: item.index, end: item.end, char: '∫', x: x0, y: baseline - item.ascent, page, width: item.width, height: rowHeight, size: item.size, pen: item.pen, box: item.box });
+            previous = null;
             continue;
           }
           carets[item.index] = caret;
-          if (item.kind === 'char') placements.push({ index: item.index, char: item.char, x: x0, y: baseline - item.size, page, width: item.width, size: item.size, pen: item.pen, glyph: item.glyph });
+          if (item.kind === 'char') {
+            // 连笔: only straight after another character of the same pen on this row.
+            const join = item.join && previous && previous.index === item.index - 1 && previous.pen === item.pen && JOINABLE.test(item.char) && JOINABLE.test(previous.char);
+            const placement = { index: item.index, char: item.char, x: x0, y: baseline - item.size + item.shift, page, width: item.width, size: item.size, pen: item.pen, glyph: item.glyph };
+            if (item.tilt) placement.tilt = item.tilt;
+            if (join) placement.joinPrevious = true;
+            placements.push(placement);
+            previous = item;
+          } else previous = null;
         }
+        addLines(cells, baseline, page);
         // Caret after the row's last character (end of paragraph, or before the first char of the next row).
         const after = { page, x: origin + rowWidth, y: top, height: rowHeight };
         if (number === rows.length - 1) carets[end] = after;
-        top += pitch ? Math.max(pitch, rowHeight + (pitch - baseSize > 0 ? 0 : lineGap)) : rowHeight + lineGap;
+        // Paragraph line spacing (×): free text scales the row pitch; ruled paper skips whole lines.
+        const spacing = para.spacing > 0 ? para.spacing : 1;
+        top += pitch ? Math.max(pitch, rowHeight + (pitch - baseSize > 0 ? 0 : lineGap)) * Math.max(1, Math.round(spacing)) : (rowHeight + lineGap) * spacing;
       });
       start = end + 1;
     }
     for (let i = 0; i <= count; i++) if (!carets[i]) carets[i] = carets[i - 1] || { page: 1, x: left(1), y: margin, height: baseSize };
-    return { placements, carets, missing: [...missing], formulaErrors, overflow, pages: page };
+    return { placements, decorations, carets, missing: [...missing], formulaErrors, overflow, pages: page };
+
+    /** List marker in the hanging column: a small dot, or "n." in glyphs (right-aligned to the text). */
+    function addMarker(kind, n, x, width, baseline, markerPage, pen) {
+      if (kind === 'bullet') {
+        const r = baseSize * .1, cx = x + width * .45, cy = baseline - baseSize * .4;
+        decorations.push({ page: markerPage, pen, kind: 'bullet', points: Array.from({ length: 9 }, (_, i) => [cx + r * Math.cos(i * Math.PI / 4), cy + r * Math.sin(i * Math.PI / 4)]) });
+        return;
+      }
+      const marks = Array.from(`${n}.`).map((char) => {
+        const glyph = marker(char);
+        if (!glyph) missing.add(char);
+        return { char, glyph, width: widthOf(char, glyph, baseSize) };
+      });
+      let at = x + width - baseSize * .5 - marks.reduce((sum, mark) => sum + mark.width, 0) - gap * (marks.length - 1);
+      for (const mark of marks) {
+        if (mark.glyph) placements.push({ kind: 'marker', index: -1, char: mark.char, x: at, y: baseline - baseSize, page: markerPage, width: mark.width, size: baseSize, pen, glyph: mark.glyph });
+        at += mark.width + gap;
+      }
+    }
+    /** Underline / strike-through spans over consecutive decorated cells of a row (blanks between them included). */
+    function addLines(cells, baseline, linePage) {
+      for (const [bit, kind] of [[1, 'underline'], [2, 'strike']]) {
+        let span = null;
+        const flush = () => {
+          if (!span) return;
+          const y = kind === 'underline' ? baseline + span.size * .12 + .3 : baseline - span.size * .42;
+          decorations.push({ page: linePage, pen: span.pen, kind, points: [[span.from, y], [span.to, y]] });
+          span = null;
+        };
+        for (const { item } of cells) {
+          const on = item.lines & bit;
+          if (!on || (span && span.pen !== item.pen)) flush();
+          if (!on) continue;
+          if (!span) span = { from: item.x0, to: item.x0 + item.width, size: item.size, pen: item.pen };
+          else { span.to = item.x0 + item.width; span.size = Math.max(span.size, item.size); }
+        }
+        flush();
+      }
+    }
+  }
+
+  /**
+   * Pen strokes of a text layout in paper mm (top-down): glyphs (with 拟真 slant and 连笔), list numbers, formulas,
+   * underlines / strike-through / bullets. Shared by the paper preview and the generator → [{ page, pen, points }].
+   * pen 0 = the draft's text pen.
+   */
+  function textStrokes(result) {
+    const strokes = [];
+    let tail = null; // last stroke of the previous character, for 连笔
+    for (const item of result.placements) {
+      if (item.kind === 'formula') {
+        for (const points of item.box.strokes) strokes.push({ page: item.page, pen: item.pen || 0, points: points.map(([px, py]) => [item.x + px, item.y + py]) });
+        tail = null;
+        continue;
+      }
+      if (!item.glyph) { tail = null; continue; }
+      const k = item.size / item.glyph.unitsPerEm, tilt = item.tilt || 0;
+      // Slant shears around the baseline (glyph bottom) so letters lean without leaving their row.
+      const map = tilt ? ([u, v]) => [item.x + u * k + (item.size - v * k) * tilt, item.y + v * k] : ([u, v]) => [item.x + u * k, item.y + v * k];
+      const own = item.glyph.strokes.map((points) => ({ page: item.page, pen: item.pen || 0, points: points.map(map) }));
+      if (item.joinPrevious && tail && own.length) {
+        const from = tail.points.at(-1), to = own[0].points[0];
+        // Lift-free connection only for nearby strokes; a slight downward bow like a hand's 连笔.
+        if (Math.hypot(to[0] - from[0], to[1] - from[1]) <= item.size * .9 && to[0] >= from[0] - item.size * .15) {
+          const bow = [(from[0] + to[0]) / 2, Math.max(from[1], to[1]) + item.size * .06];
+          tail.points.push(bow, ...own.shift().points);
+        }
+      }
+      strokes.push(...own);
+      tail = strokes.at(-1)?.page === item.page ? strokes.at(-1) : null;
+    }
+    for (const decoration of result.decorations || []) strokes.push({ page: decoration.page, pen: decoration.pen || 0, points: decoration.points });
+    return strokes;
   }
 
   const BACKGROUNDS = ['none', 'lines', 'four-line', 'grid', 'tianzige', 'mizige', 'composition'];
@@ -213,12 +355,31 @@
     return ordered;
   }
 
+  const PEN_MODES = ['z', 'servo-m5', 'servo-s'];
+  /**
+   * How the pen is lifted. 'z': Z axis (penUp / penDown in mm). Servo boards driven by the spindle PWM:
+   * 'servo-m5' = M3 S<down> to write, M5 to lift; 'servo-s' = M3 S<down> / M3 S<up>. dwell (s) lets the servo settle.
+   */
+  function penProfile(options) {
+    const lift = options.penLift || { mode: 'z' };
+    if (!PEN_MODES.includes(lift.mode)) throw Error('抬笔方式无效。');
+    if (lift.mode === 'z') {
+      if (![options.penUp, options.penDown].every(Number.isFinite) || options.penUp <= options.penDown) throw Error('纸张、速度或抬落笔参数无效（抬笔 Z 必须大于落笔 Z）。');
+      return { mode: 'z', up: options.penUp, down: options.penDown, dwell: 0 };
+    }
+    const dwell = lift.dwell === undefined ? 0 : Number(lift.dwell);
+    const valid = (value) => Number.isFinite(value) && value >= 0 && value <= 10000;
+    if (!valid(lift.down) || (lift.mode === 'servo-s' && (!valid(lift.up) || lift.up === lift.down)) || !(dwell >= 0 && dwell <= 5)) throw Error('舵机抬笔参数无效（S 值 0–10000，抬笔与落笔 S 不能相同，等待 0–5 秒）。');
+    return { mode: lift.mode, down: lift.down, up: lift.mode === 'servo-s' ? lift.up : null, dwell };
+  }
+
   function generate(text, options) {
-    const { width, height, margin, size, gap, lineGap, feed, penUp, penDown } = options;
+    const { width, height, margin, size, gap, lineGap, feed } = options;
     // Pen zero (work 0,0) in paper mm from the left / bottom edge, and machine axis directions.
     const origin = { x: 0, y: 0, dirX: 1, dirY: 1, ...options.origin };
     if (![origin.x, origin.y].every(Number.isFinite) || ![1, -1].includes(origin.dirX) || ![1, -1].includes(origin.dirY)) throw Error('笔起点或坐标方向无效。');
-    if (![width,height,margin,size,gap,lineGap,feed,penUp,penDown].every(Number.isFinite) || width<=0 || height<=0 || size<=0 || feed<=0 || margin<0 || gap<0 || lineGap<0 || margin*2+size>Math.min(width,height) || penUp<=penDown) throw Error('纸张、速度或抬落笔参数无效（抬笔 Z 必须大于落笔 Z）。');
+    if (![width,height,margin,size,gap,lineGap,feed].every(Number.isFinite) || width<=0 || height<=0 || size<=0 || feed<=0 || margin<0 || gap<0 || lineGap<0 || margin*2+size>Math.min(width,height)) throw Error('纸张、速度或抬落笔参数无效（抬笔 Z 必须大于落笔 Z）。');
+    const lift = penProfile(options);
     const result = layoutText(text, options, options.resolve || defaultResolver());
     // Drawing paths (paper mm, top-down) already placed on pages and assigned to pens.
     const drawings = Array.isArray(options.paths) ? options.paths : [];
@@ -232,39 +393,31 @@
     const page = options.page === undefined ? 1 : options.page;
     if (!Number.isInteger(page) || page < 1 || page > pages) throw Error(`页码无效：共 ${pages} 页。`);
     const n = value => Number(value.toFixed(3));
-    const lines = ['; Single-line text / Z-axis pen profile - review before use',
+    const servo = lift.mode !== 'z';
+    const raise = servo ? [lift.mode === 'servo-m5' ? 'M5' : `M3 S${n(lift.up)}`, ...(lift.dwell ? [`G4 P${n(lift.dwell)}`] : [])] : [`G0 Z${n(lift.up)}`];
+    const lower = servo ? [`M3 S${n(lift.down)}`, ...(lift.dwell ? [`G4 P${n(lift.dwell)}`] : [])] : [`G1 Z${n(lift.down)} F${n(Math.min(feed,300))}`];
+    const profile = servo ? `servo pen (M3 S${n(lift.down)} down, ${lift.mode === 'servo-m5' ? 'M5' : `M3 S${n(lift.up)}`} up)` : 'Z-axis pen';
+    const lines = [`; Single-line text / ${profile} profile - review before use`,
       `; Pen zero at ${n(origin.x)} mm from paper left, ${n(origin.y)} mm from paper bottom; +X ${origin.dirX > 0 ? 'right' : 'left'}, +Y ${origin.dirY > 0 ? 'up' : 'down'}`,
       `; Page ${page} of ${pages}${pen === null ? '' : `; pen ${pen}`}`,
-      'G21', 'G90', 'G17', `G0 Z${n(penUp)}`, `G1 F${n(feed)}`];
+      'G21', 'G90', 'G17', ...raise, `G1 F${n(feed)}`];
     const toWork = (px, py) => `X${n(origin.dirX*(px-origin.x))} Y${n(origin.dirY*(height-py-origin.y))}`;
     const stroke = (points) => {
-      lines.push(`G0 ${toWork(...points[0])}`, `G1 Z${n(penDown)} F${n(Math.min(feed,300))}`);
+      lines.push(`G0 ${toWork(...points[0])}`, ...lower);
       for (const p of points.slice(1)) lines.push(`G1 ${toWork(...p)} F${n(feed)}`);
-      lines.push(`G0 Z${n(penUp)}`);
+      lines.push(...raise);
     };
-    // Each character / formula is written with its own size and pen (formatting runs), else the text pen.
-    for (const item of result.placements.filter((entry) => entry.page === page && (pen === null || pen === (entry.pen || textPen)))) {
-      if (item.kind === 'formula') {
-        for (const points of item.box.strokes) stroke(points.map(([px, py]) => [item.x + px, item.y + py]));
-        continue;
-      }
-      const { x, y, glyph } = item;
-      const scale = (item.size || size) / glyph.unitsPerEm;
-      const point = p => `X${n(origin.dirX*(x+p[0]*scale-origin.x))} Y${n(origin.dirY*(height-y-p[1]*scale-origin.y))}`;
-      for (const strokePoints of glyph.strokes) {
-        lines.push(`G0 ${point(strokePoints[0])}`, `G1 Z${n(penDown)} F${n(Math.min(feed,300))}`);
-        for (const p of strokePoints.slice(1)) lines.push(`G1 ${point(p)} F${n(feed)}`);
-        lines.push(`G0 Z${n(penUp)}`);
-      }
-    }
+    // Each character / formula / decoration is written with its own pen (formatting runs), else the text pen.
+    for (const item of textStrokes(result)) if (item.page === page && (pen === null || pen === (item.pen || textPen))) stroke(item.points);
     for (const points of orderPaths(drawings.filter((item) => item.page === page && (pen === null || item.pen === pen)).map((item) => item.points))) stroke(points);
     lines.push('; End - pen remains raised, no automatic homing');
     return lines.join('\n');
   }
   // Deliberately strict subset: do not silently simulate unknown machine commands.
-  function parse(source, penDown=0) {
-    if (source.length > 500000) return { segments: [], errors: ['程序超过 500 KB 预览上限，请拆分。'], commands: [], bounds: { minX:0,minY:0,maxX:0,maxY:0,minZ:0,maxZ:0 }, length: 0 };
-    let pos={x:0,y:0,z:0}, absolute=true, unit=1, mode=0, feed=1000, explicitPen=null;
+  /** profile (optional) = { mode: 'servo-s', down, up }: M3 S<up> lifts the pen instead of writing. */
+  function parse(source, penDown=0, profile=null) {
+    if (source.length > 500000) return { segments: [], errors: ['程序超过 500 KB 预览上限，请拆分。'], commands: [], bounds: { minX:0,minY:0,maxX:0,maxY:0,minZ:0,maxZ:0 }, length: 0, dwell: 0 };
+    let pos={x:0,y:0,z:0}, absolute=true, unit=1, mode=0, feed=1000, explicitPen=null, spindle=false, spindleS=null, dwell=0;
     const segments=[], errors=[], commands=[];
     const bounds={minX:0,minY:0,maxX:0,maxY:0,minZ:0,maxZ:0};
     let length=0;
@@ -275,26 +428,33 @@
       if (!code) return;
       const tokens=[...code.matchAll(/([A-Z])\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))/g)];
       if (!tokens.length || code.replace(/([A-Z])\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))/g,'').trim()) { errors.push(`第 ${line} 行：无法解析`); return; }
-      const words={}; let invalid=false;
+      const words={}; let invalid=false, pause=false, m3=false;
       for (const [,letter,num] of tokens) {
         const value=Number(num);
         if (!Number.isFinite(value)) {invalid=true;break;}
         if (letter==='G') {
           if ([0,1,2,3].includes(value)) mode=value;
+          else if (value===4) pause=true;
           else if (value===90) absolute=true;
           else if (value===91) absolute=false;
           else if (value===20) unit=25.4;
           else if (value===21) unit=1;
           else if (value!==17) invalid=true;
         } else if (letter==='M') {
-          if (value===3) explicitPen=true;
-          else if (value===5) explicitPen=false;
+          if (value===3) { explicitPen=true; spindle=true; m3=true; }
+          else if (value===5) { explicitPen=false; spindle=false; }
           else if (![2,30].includes(value)) invalid=true;
           if ([2,30].includes(value)) { errors.push(`第 ${line} 行：请移除 M2 / M30 结束标记后再导入`); invalid=true; }
-        } else if ('XYZIJFSN'.includes(letter)) { if (letter in words) invalid=true; words[letter]=value; }
+        } else if ('XYZIJFSNP'.includes(letter)) { if (letter in words) invalid=true; words[letter]=value; }
         else invalid=true;
       }
-      if (invalid) { errors.push(`第 ${line} 行：包含不支持的指令；仅支持 G0–G3、G17、G20/21、G90/91、M3/5 和 XYZ/IJ/F/S/N`); return; }
+      // G4 P<seconds> (dwell) stands alone; P is accepted nowhere else.
+      if (!invalid && (pause ? words.P===undefined || words.P<0 || words.P>60 || Object.keys(words).some((key)=>!'PN'.includes(key)) : words.P!==undefined)) invalid=true;
+      if (invalid) { errors.push(`第 ${line} 行：包含不支持的指令；仅支持 G0–G4、G17、G20/21、G90/91、M3/5 和 XYZ/IJ/F/S/N/P`); return; }
+      if (pause) { dwell+=words.P; commands.push({line,code}); return; }
+      // Two-value servo profile: the S value decides whether M3 writes (close to the down value) or lifts.
+      if (words.S!==undefined) spindleS=words.S;
+      if (profile?.mode==='servo-s' && spindle && (m3 || words.S!==undefined) && spindleS!==null) explicitPen=Math.abs(spindleS-profile.down)<=Math.abs(spindleS-profile.up);
       if (words.F!==undefined) {feed=words.F*unit;if(feed<=0) {errors.push(`第 ${line} 行：进给速度必须为正数`);return;}}
       const next={...pos};
       for (const axis of ['x','y','z']) if (words[axis.toUpperCase()]!==undefined) next[axis]=(absolute?0:pos[axis])+words[axis.toUpperCase()]*unit;
@@ -324,9 +484,9 @@
       pos=next;
       commands.push({line,code});
     });
-    return {segments,errors,commands,bounds,length};
+    return {segments,errors,commands,bounds,length,dwell};
   }
-  const api={generate,parse,layoutText,orderPaths,backgroundPaths,BACKGROUNDS,GRID_BACKGROUNDS,MAX_PAGES};
+  const api={generate,parse,layoutText,textStrokes,naturalVariation,orderPaths,backgroundPaths,BACKGROUNDS,GRID_BACKGROUNDS,PEN_MODES,MAX_PAGES};
   if(typeof module!=='undefined'&&module.exports) module.exports=api;
   else root.PathEngine=api;
 })(typeof window!=='undefined'?window:globalThis);

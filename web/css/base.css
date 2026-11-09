@@ -346,3 +346,6 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 .pane-body .coordinate-fields { padding: 0; }
 #device-status { font-size: 11px; }
 .sidebar-heading > div { gap: 0; }
+/* 格式刷 armed: the paper shows a copy cursor until the next selection. */
+.paper-sheet.painting canvas { cursor: copy; }
+.format-bar button u, .format-bar button s { pointer-events: none; }

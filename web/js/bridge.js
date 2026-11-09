@@ -165,7 +165,8 @@ async function sendJob() {
   const machine = window.Coordinates?.machineLimits();
   if (!approved?.ready || !approved.idle) { log('坐标未就绪，请先读取并确认纸张原点。'); return; }
   if (!machine) { openConnection('pane-limits'); log('请在「机器 › 行程与安全」填写机器 XYZ 最小 / 最大行程（机器坐标）。'); return; }
-  if (!await AppDialogs.confirm({ title: '发送至真实机器', message: `坐标系 ${approved.wcs}。请核对纸张原点、机器行程与抬落笔方式，并准备好物理急停。`, confirmLabel: '确认发送', danger: true })) return;
+  const liftText = $('#pen-mode').value === 'z' ? 'Z 轴抬笔' : `舵机抬笔（落笔 M3 S${$('#servo-down').value}，抬笔 ${$('#pen-mode').value === 'servo-m5' ? 'M5' : `M3 S${$('#servo-up').value}`}）`;
+  if (!await AppDialogs.confirm({ title: '发送至真实机器', message: `坐标系 ${approved.wcs} · ${liftText}。请核对纸张原点、机器行程与抬落笔方式，并准备好物理急停。`, confirmLabel: '确认发送', danger: true })) return;
   if (!bridgeHealthy || !hardware.connected || hardwareJob || controllerBusy() || window.Coordinates?.snapshot()?.token !== approved.token || window.Workspace?.blocked || !$('#safety-confirm').checked || codeEditor.value !== source || window.Workspace?.activeId !== target) { log('设备或程序状态已改变，请重新检查后发送。'); return; }
   // Paper area (dialog width / height) mapped through the pen origin into work coordinates.
   const area = paperWorkBounds(+$('#machine-x').value, +$('#machine-y').value);
@@ -183,7 +184,9 @@ async function sendJob() {
   $('#execution-mode').textContent = '正在提交硬件任务（不自动重试）';
   $('#execution-mode').hidden = false;
   try {
-    const result = await api('job', { lines, limits, machine, expected: approved.token, reviewed: true });
+    // Servo pen lift: the server then accepts exactly these M3 S / M5 / G4 P lines and nothing else.
+    const lift = penLift();
+    const result = await api('job', { lines, limits, machine, expected: approved.token, reviewed: true, ...(lift.mode === 'z' ? {} : { pen: lift }) });
     ownJobId = result.job_id;
     applyHardware(result);
     selectView('path');

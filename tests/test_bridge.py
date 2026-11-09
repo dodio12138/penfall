@@ -18,6 +18,21 @@ MACHINE = dict(xmin=-300,xmax=0,ymin=-300,ymax=0,zmin=-30,zmax=0)
 
 
 class BridgeValidation(unittest.TestCase):
+    def test_servo_profile_allows_only_its_pen_commands(self):
+        pen = dict(mode='servo-m5', down=30, dwell=.15)
+        lines = ['G21', 'G90', 'M5', 'G4 P0.15', 'G0 X1 Y1', 'M3 S30', 'G4 P0.15', 'G1 X2 Y2 F1200', 'M5']
+        self.assertEqual(bridge.validate_job(lines, LIMITS, pen), lines)
+        for line in ['M3 S100', 'M3', 'S30', 'M3 S30 X1', 'G4 P9', 'G4 P1 X1', 'G1 X1 P1', 'M8']:
+            with self.subTest(line=line), self.assertRaises(ValueError):
+                bridge.validate_job(['G21', 'G90', line], LIMITS, pen)
+        with self.assertRaises(ValueError):
+            bridge.validate_job(['G21', 'G90', 'M5'], LIMITS)
+        two = dict(mode='servo-s', down=30, up=90)
+        self.assertEqual(len(bridge.validate_job(['G21', 'G90', 'M3 S90', 'M3 S30'], LIMITS, two)), 4)
+        for bad in [dict(mode='laser', down=1), dict(mode='servo-s', down=30, up=30), dict(mode='servo-m5', down=-1), dict(mode='servo-m5', down=30, dwell=9), dict(mode='servo-m5', down=True)]:
+            with self.subTest(pen=bad), self.assertRaises(ValueError):
+                bridge.validate_job(['G21', 'G90'], LIMITS, bad)
+
     def test_generated_subset(self):
         lines=['G21','G90','G17','G0 Z5','G0 X20 Y20','G1 Z0 F300','G1 X40 Y40 F1200','G0 Z5']
         self.assertEqual(len(bridge.validate_job(lines,LIMITS)),len(lines))

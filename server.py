@@ -96,7 +96,53 @@ def snapshot():
     return result
 
 
-def validate_job(lines, limits):
+def pen_profile(pen):
+    """Servo pen lift sent with a job: {'mode': 'servo-m5' | 'servo-s', 'down': S, 'up': S | None, 'dwell': seconds}."""
+    if pen is None:
+        return None
+    if not isinstance(pen, dict) or pen.get('mode') not in ('servo-m5', 'servo-s'):
+        raise ValueError('抬笔方式无效')
+    def s_value(value):
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 <= value <= 10000:
+            raise ValueError('舵机 S 值必须在 0–10000')
+        return float(value)
+    down = s_value(pen.get('down'))
+    up = s_value(pen.get('up')) if pen['mode'] == 'servo-s' else None
+    if up is not None and up == down:
+        raise ValueError('抬笔与落笔 S 值不能相同')
+    dwell = pen.get('dwell', 0)
+    if isinstance(dwell, bool) or not isinstance(dwell, (int, float)) or not math.isfinite(dwell) or not 0 <= dwell <= 5:
+        raise ValueError('抬落笔等待必须在 0–5 秒')
+    return {'mode': pen['mode'], 'down': down, 'up': up, 'dwell': float(dwell)}
+
+
+def servo_word(letter, value, tokens, servo):
+    """With a servo pen profile, accept only the pen commands it implies, each on a line of its own:
+    M3 S<down>, M3 S<up> (two-value servos) or M5, and G4 P<dwell>. Returns True when the word is one of them."""
+    words = [item[0] for item in tokens]
+    if letter == 'G' and value == 4:
+        if words != ['G', 'P']:
+            raise ValueError('G4 只能单独一行，并带 P 等待秒数')
+        return True
+    if letter == 'P':
+        if words != ['G', 'P'] or float(tokens[0][1]) != 4 or not 0 <= value <= 5:
+            raise ValueError('P 只用于 G4 等待，且不超过 5 秒')
+        return True
+    if letter == 'M':
+        if value == 5 and words == ['M']:
+            return True
+        if value == 3 and words == ['M', 'S']:
+            return True
+        raise ValueError('舵机抬笔只接受单独一行的 M3 S… 或 M5')
+    if letter == 'S':
+        allowed = [servo['down']] + ([servo['up']] if servo['up'] is not None else [])
+        if words != ['M', 'S'] or float(tokens[0][1]) != 3 or value not in allowed:
+            raise ValueError('S 值必须是确认的落笔 / 抬笔值，并与 M3 同一行')
+        return True
+    return False
+
+
+def validate_job(lines, limits, pen=None):
     if not isinstance(lines, list) or not 1 <= len(lines) <= 20000:
         raise ValueError('程序必须为 1–20000 行')
     # Paper area in work coordinates. The pen zero may sit anywhere on the paper, so ranges can be negative;
@@ -106,6 +152,7 @@ def validate_job(lines, limits):
     miny, maxy = float(limits.get('ymin', 0)), float(limits['ymax'] if 'ymax' in limits else limits['y'])
     if not all(map(math.isfinite, (lowz, highz, minx, maxx, miny, maxy))) or not (-200 <= lowz < highz <= 200 and -2000 <= minx < maxx <= 2000 and -2000 <= miny < maxy <= 2000 and maxx - minx <= 2000 and maxy - miny <= 2000):
         raise ValueError('纸张坐标范围无效')
+    servo = pen_profile(pen)
     mm = absolute = feed_known = False
     motion_mode = 0
     commands = []
@@ -124,6 +171,8 @@ def validate_job(lines, limits):
             if letter in seen:
                 raise ValueError('真实发送要求每行每类字仅出现一次；请分行书写')
             seen.add(letter)
+            if servo and letter in 'GMSP' and servo_word(letter, value, tokens, servo):
+                continue
             if letter == 'G':
                 if value not in (0, 1, 17, 21, 90):
                     raise ValueError('真实发送暂限 G0/G1、G17、G21、G90；其他代码请先转换为绝对毫米直线')
@@ -427,7 +476,7 @@ class Handler(SimpleHTTPRequestHandler):
                             raise ValueError('控制器不是 Idle，拒绝任务')
                         if not data.get('expected') or data['expected'] != coordinates['token']:
                             raise ValueError('坐标或位置已改变，请重新确认后发送')
-                        lines = validate_job(data.get('lines'), data.get('limits', {}))
+                        lines = validate_job(data.get('lines'), data.get('limits', {}), data.get('pen'))
                         validate_machine_path(lines, coordinates, data.get('machine', {}))
                         CANCEL.clear()
                         PAUSE.clear()

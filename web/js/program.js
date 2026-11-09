@@ -12,7 +12,19 @@ function updateBackgroundFields() {
   $('#bg-gap-label').hidden = kind !== 'composition';
   $('#bg-pen-label').hidden = kind === 'none' || $('#bg-write').value !== 'yes';
 }
-const motionInputs = ['feed', 'pen-up', 'pen-down', 'origin-corner', 'origin-x', 'origin-y', 'x-dir', 'y-dir', 'page', 'page-set', 'text-pen', 'pen'];
+/** Only the pen-lift fields of the chosen method (Z axis / servo) are shown. */
+function updatePenFields() {
+  const mode = $('#pen-mode').value, servo = mode !== 'z';
+  for (const id of ['pen-up-label', 'pen-down-label']) $(`#${id}`).hidden = servo;
+  for (const id of ['servo-down-label', 'pen-delay-label']) $(`#${id}`).hidden = !servo;
+  $('#servo-up-label').hidden = mode !== 'servo-s';
+}
+/** Pen lift of the draft for the generator, the preview parser and the server's job check. */
+function penLift() {
+  const mode = $('#pen-mode').value;
+  return mode === 'z' ? { mode } : { mode, down: Number($('#servo-down').value), up: mode === 'servo-s' ? Number($('#servo-up').value) : null, dwell: Number($('#pen-delay').value) };
+}
+const motionInputs = ['feed', 'pen-mode', 'pen-up', 'pen-down', 'servo-down', 'servo-up', 'pen-delay', 'origin-corner', 'origin-x', 'origin-y', 'x-dir', 'y-dir', 'page', 'page-set', 'text-pen', 'pen'];
 // Which job of the draft is generated: one page × one pen. They only change the generator output.
 const JOB_INPUTS = ['page', 'page-set', 'pen'];
 let toolpath = PathEngine.parse('');
@@ -26,25 +38,36 @@ let pathDistance = 0;
 function formatBounds(b) {
   return `X ${b.minX.toFixed(1)}…${b.maxX.toFixed(1)} / Y ${b.minY.toFixed(1)}…${b.maxY.toFixed(1)}`;
 }
+/** Writing time estimated from feed rates (travel at SIM_RAPID_FEED) plus dwells; no acceleration model. */
+function estimateSeconds(path) {
+  return path.segments.reduce((sum, segment) => sum + segment.distance / ((segment.rapid ? SIM_RAPID_FEED : segment.feed) / 60), 0) + (path.dwell || 0);
+}
+function formatDuration(seconds) {
+  const total = Math.max(1, Math.round(seconds)), h = Math.floor(total / 3600), m = Math.floor(total % 3600 / 60), s = total % 60;
+  return h ? `约 ${h} 小时 ${m} 分` : m ? `约 ${m} 分 ${s} 秒` : `约 ${s} 秒`;
+}
 function programSummary() {
   if (!codeEditor.value.trim()) return '尚未生成 / 导入';
   if (toolpath.errors.length) return `${toolpath.errors.length} 个解析问题，禁止运行`;
   const page = programSource === 'generated' && layout.pages > 1 ? `第 ${currentPage()} / ${layout.pages} 页 · ` : '';
   const pens = usedPens(currentPage());
   const pen = programSource !== 'generated' || pens.length < 2 ? '' : $('#pen').value === 'all' ? `含 ${pens.length} 种颜色，当前程序不换笔 · ` : `只写「${penName(Number($('#pen').value))}」笔 · `;
-  return `${page}${pen}${toolpath.commands.length} 行指令 · ${toolpath.segments.length} 段轨迹${programDirty ? ' · 文稿已修改，请重新生成或确认使用现有代码' : ''}`;
+  const time = toolpath.segments.length ? ` · 预计 ${formatDuration(estimateSeconds(toolpath))}` : '';
+  return `${page}${pen}${toolpath.commands.length} 行指令 · ${toolpath.segments.length} 段轨迹${time}${programDirty ? ' · 文稿已修改，请重新生成或确认使用现有代码' : ''}`;
 }
 function parseProgram({ keepCamera = false } = {}) {
   clearTimeout(parseTimer);
   resetSimulation();
   pathDistance = 0;
   if (!keepCamera) resetPathCamera();
-  toolpath = PathEngine.parse(codeEditor.value, Number($('#pen-down').value));
+  toolpath = PathEngine.parse(codeEditor.value, Number($('#pen-down').value), penLift());
   renderLineNumbers($('#gcode-lines'), codeEditor);
   $('#code-errors').textContent = toolpath.errors.slice(0, 6).join('\n') + (toolpath.errors.length > 6 ? `\n… 另有 ${toolpath.errors.length - 6} 个问题` : '');
   $('#code-state').textContent = programSummary();
   $('#code-state').classList.toggle('has-error', toolpath.errors.length > 0);
-  $('#path-stats').textContent = `${toolpath.segments.length} 段 · ${toolpath.length.toFixed(1)} mm · ${formatBounds(toolpath.bounds)}`;
+  const seconds = estimateSeconds(toolpath);
+  $('#path-stats').textContent = `${toolpath.segments.length} 段 · ${toolpath.length.toFixed(1)} mm${seconds ? ` · 预计 ${formatDuration(seconds)}` : ''} · ${formatBounds(toolpath.bounds)}`;
+  $('#path-stats').title = '预计书写时间按进给速度估算（空移 3000 mm/min，含抬落笔等待），不含加减速';
   updateTask();
   drawToolpath();
   window.Workspace?.capture();
@@ -87,14 +110,14 @@ function setProgram(text, view, source = 'manual', options) {
 }
 function buildProgram() {
   if (!settings.every((id) => validSetting(id, $(`#${id}`).value)) || !motionInputs.every((id) => $(`#${id}`).checkValidity() && $(`#${id}`).value !== '')) throw Error('请修正排版或笔轴参数。');
-  const c = config();
-  return PathEngine.generate(content.value, { width: layout.width, height: layout.height, margin: +c.margin, gutter: +c.gutter, size: +c['font-size'], gap: +c['letter-gap'], lineGap: +c['line-gap'], feed: +$('#feed').value, penUp: +$('#pen-up').value, penDown: +$('#pen-down').value, origin: penOrigin(), resolve: glyphResolver(), page: currentPage(), paths: [...(layout.backgroundWritten ? layout.background.map((rule) => ({ page: rule.page, pen: Number($('#bg-pen').value) || 1, points: rule.points })) : []), ...layout.paths], pen: $('#pen').value, textPen: Number($('#text-pen').value) || 1, grid: layout.layoutOptions.grid, pitch: layout.layoutOptions.pitch });
+  // Same layout options as the paper (formatting, formulas, list numbers, 拟真), with the applied glyph selection.
+  return PathEngine.generate(content.value, { ...layoutOptions(), feed: +$('#feed').value, penUp: +$('#pen-up').value, penDown: +$('#pen-down').value, penLift: penLift(), origin: penOrigin(), resolve: glyphResolver(), page: currentPage(), paths: [...(layout.backgroundWritten ? layout.background.map((rule) => ({ page: rule.page, pen: Number($('#bg-pen').value) || 1, points: rule.points })) : []), ...layout.paths], pen: $('#pen').value, textPen: Number($('#text-pen').value) || 1 });
 }
 function generateProgram(view = 'gcode') {
   clearTimeout(regenerateTimer);
   try {
     setProgram(buildProgram(), view, 'generated');
-    log('已生成单线 G-code（毫米 / 绝对坐标 / Z 轴抬笔）。真实发送前必须核对设备兼容性。');
+    log(`已生成单线 G-code（毫米 / 绝对坐标 / ${$('#pen-mode').value === 'z' ? 'Z 轴抬笔' : '舵机抬笔'}）。真实发送前必须核对设备兼容性。`);
   } catch (error) {
     log(`生成失败，保留原有 G-code：${error.message}`);
     $('#code-errors').textContent = error.message;
@@ -215,6 +238,8 @@ for (const id of ['machine-x', 'machine-y']) $(`#${id}`).addEventListener('input
 $('#page-set').addEventListener('input', () => { setPage(currentPage()); updatePagers(); });
 $('#pen').addEventListener('input', updatePenPicker);
 for (const id of ['bg-kind', 'bg-write']) $(`#${id}`).addEventListener('input', updateBackgroundFields);
+$('#pen-mode').addEventListener('input', () => { updatePenFields(); parseProgram({ keepCamera: true }); });
+updatePenFields();
 /** The 笔 picker appears only when this page uses more than one pen. */
 function updatePenPicker() {
   const pens = usedPens();
