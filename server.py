@@ -38,10 +38,10 @@ ASSETS = static_assets()
 
 
 def is_asset(path):
-    """Whitelist check; glyph libraries dropped into web/glyphs/ are picked up without a restart."""
+    """Whitelist check; files added under web/ (e.g. glyph libraries) are picked up without a restart."""
     global ASSETS
     path = path.split('?', 1)[0]
-    if path not in ASSETS and path.startswith('/glyphs/'):
+    if path not in ASSETS and '..' not in path:
         ASSETS = static_assets()
     return path in ASSETS
 PROJECT = Path(__file__).resolve().parent

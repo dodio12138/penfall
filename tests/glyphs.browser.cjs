@@ -37,7 +37,7 @@ const library={format:'web-typewriter/glyph-library',version:1,id:'test-hand',na
       await page.locator('#preview-tab').click();
       const box=await page.locator('#preview').boundingBox();
       const scale=box.width/210;
-      await page.mouse.click(box.x+22.5*scale,box.y+22.5*scale);
+      await page.mouse.click(box.x+22.5*scale,box.y+22.5*scale,{button:'right'});
       await page.locator('.glyph-picker').waitFor();
       assert.match(await page.locator('.glyph-picker-heading').textContent(),/「龘」第 1 处/);
       await page.locator('.glyph-picker .glyph-choice').nth(2).click();
@@ -78,8 +78,8 @@ const library={format:'web-typewriter/glyph-library',version:1,id:'test-hand',na
       assert.equal(await page.locator('#glyph-strategy').inputValue(),'cycle');
       // Server library loads on demand when enabled.
       await page.locator('.glyph-library').filter({hasText:'演示变体'}).locator('input').check();
-      await page.waitForFunction(()=>[...document.querySelectorAll('.glyph-prefer-char')].some(el=>el.textContent==='B'));
-      assert.equal(await page.locator('.glyph-prefer').filter({hasText:'B'}).locator('.glyph-choice').count(),6); // 自动 + builtin + 4 demo
+      // 自动 + built-in + skeleton Kai + 4 demo variants, once the demo library has loaded.
+      await page.waitForFunction(()=>[...document.querySelectorAll('.glyph-prefer')].some(row=>row.querySelector('.glyph-prefer-char').textContent==='B'&&row.querySelectorAll('.glyph-choice').length===7));
       assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
       assert.deepEqual(errors,[]);
       console.log(`Glyphs ${width}px: import, coverage, cycle strategy, paper pick, pin shift, per-char default, missing glyphs, persistence and server library passed.`);

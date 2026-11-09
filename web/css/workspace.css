@@ -34,7 +34,7 @@ body.sidebar-hidden #sidebar-resizer { display: none; }
 #empty-workspace { display: flex; flex: 1; min-height: 160px; padding: 30px 20px; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: var(--muted); }
 #empty-workspace h1 { font-size: 19px; font-weight: 500; color: var(--text); margin: 0 0 16px; }
 #empty-workspace > div { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
-.no-document :is(.editor-toolbar, .editor-view, .preview-view, .code-workspace, .path-view, .bottom-panel, .taskbar, #log-resizer, #find-bar) { display: none !important; }
+.no-document :is(.editor-toolbar, .format-bar, .editor-view, .preview-view, .code-workspace, .path-view, .bottom-panel, .taskbar, #log-resizer, #find-bar) { display: none !important; }
 #workspace-warning { display: flex; align-items: center; gap: 8px; padding: 8px 12px; flex-wrap: wrap; background: var(--warning-bg); border-bottom: 1px solid #726044; color: var(--warning); font-size: 11px; flex-shrink: 0; }
 #workspace-warning-text { flex: 1 1 150px; line-height: 1.7; overflow-wrap: anywhere; }
 #workspace-warning button { font-size: 11px; }
@@ -150,3 +150,5 @@ body.sidebar-hidden #sidebar-resizer { display: none; }
 .document-tab.dirty .close-document:hover::after { content: '×'; font-size: 18px; }
 .document-tab.kind-link .document-tab-name::before { content: '稿 '; color: #f0b46b; font-size: 11px; }
 #empty-workspace p { max-width: 360px; margin: 0 0 16px; line-height: 1.7; }
+
+.main-area:is([data-view=gcode], [data-view=path]) .format-bar { display: none; }

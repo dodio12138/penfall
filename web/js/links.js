@@ -104,6 +104,54 @@
     return { runs, paras };
   }
 
+  /** Set (value) or clear (null) run attributes on [from, to): splits / merges runs as needed. */
+  function applyRun(style, from, to, attrs) {
+    if (to <= from) return style;
+    const pieces = [];
+    for (const run of style.runs) {
+      if (run.to <= from || run.from >= to) { pieces.push(run); continue; }
+      if (run.from < from) pieces.push({ ...run, to: from });
+      if (run.to > to) pieces.push({ ...run, from: to });
+      pieces.push({ ...run, from: Math.max(run.from, from), to: Math.min(run.to, to), inside: true });
+    }
+    // Gaps inside the range not covered by any run get a new run.
+    const covered = pieces.filter((run) => run.inside).sort((a, b) => a.from - b.from);
+    let at = from;
+    for (const run of covered) { if (run.from > at) pieces.push({ from: at, to: run.from, inside: true }); at = Math.max(at, run.to); }
+    if (at < to) pieces.push({ from: at, to, inside: true });
+    const runs = pieces.map(({ inside, ...run }) => {
+      if (!inside) return run;
+      const next = { ...run };
+      for (const [key, value] of Object.entries(attrs)) { if (value === null || value === undefined) delete next[key]; else next[key] = value; }
+      return next;
+    }).filter((run) => run.size || run.pen).sort((a, b) => a.from - b.from);
+    // Merge neighbours with identical attributes.
+    const merged = [];
+    for (const run of runs) {
+      const last = merged.at(-1);
+      if (last && last.to === run.from && last.size === run.size && last.pen === run.pen) last.to = run.to; else merged.push({ ...run });
+    }
+    return { runs: merged, paras: style.paras };
+  }
+  /** Paragraph start indices for the paragraphs touching [from, to]. */
+  function paragraphStarts(text, from, to) {
+    const chars = Array.from(text), starts = [];
+    let start = from;
+    while (start > 0 && chars[start - 1] !== '\n') start--;
+    starts.push(start);
+    for (let i = start; i < Math.min(to, chars.length); i++) if (chars[i] === '\n' && i + 1 <= to) starts.push(i + 1);
+    return [...new Set(starts)];
+  }
+  function applyParagraph(style, starts, attrs) {
+    const paras = new Map(style.paras.map((para) => [para.at, { ...para }]));
+    for (const at of starts) {
+      const next = { ...(paras.get(at) || { at }) };
+      for (const [key, value] of Object.entries(attrs)) { if (value === null || value === undefined || value === 'left' || value === 0) delete next[key]; else next[key] = value; }
+      if (next.align || next.indent) paras.set(at, next); else paras.delete(at);
+    }
+    return { runs: style.runs, paras: [...paras.values()].sort((a, b) => a.at - b.at) };
+  }
+
   function normalizeLink(raw, linkPath) {
     const value = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
     if (value.format !== undefined && value.format !== LINK_FORMAT) throw Error('不是稿件链接文件（format 应为 web-typewriter/link）');
@@ -227,7 +275,7 @@
     return { format: ARCHIVE_FORMAT, version: 1, name: typeof raw.name === 'string' ? raw.name.slice(0, 120) : '', dirs, files };
   }
 
-  const api = { normalizeFormat, shiftFormat, inputHash, LINK_FORMAT, WORKSPACE_FORMAT, ARCHIVE_FORMAT, MANIFEST, TEXT_TYPES, CODE_TYPES, DRAWING_TYPES, DEFAULT_PENS, FILE_TYPES, dirname, basename, extname, stem, join, validPart, validPath, nameError, uniqueStem, hash, paramsHash, normalizeLink, serializeLink, markSynced, analyzeSync, normalizeManifest, buildTree, documentFor, normalizeArchive };
+  const api = { normalizeFormat, shiftFormat, applyRun, applyParagraph, paragraphStarts, inputHash, LINK_FORMAT, WORKSPACE_FORMAT, ARCHIVE_FORMAT, MANIFEST, TEXT_TYPES, CODE_TYPES, DRAWING_TYPES, DEFAULT_PENS, FILE_TYPES, dirname, basename, extname, stem, join, validPart, validPath, nameError, uniqueStem, hash, paramsHash, normalizeLink, serializeLink, markSynced, analyzeSync, normalizeManifest, buildTree, documentFor, normalizeArchive };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Links = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -65,3 +65,20 @@ test('formatting follows the text through edits', () => {
   link.style = Links.shiftFormat(link.style, before, 'ABCDx\nEFG');
   assert.equal(Links.analyzeSync(link, before, 'G0').state, 'regenerate'); // formatting is a generator input
 });
+
+test('applying run / paragraph formatting splits and merges like a word processor', () => {
+  let style = { runs: [{ from: 0, to: 10, size: 8 }], paras: [] };
+  style = Links.applyRun(style, 3, 5, { pen: 2 });
+  assert.deepEqual(style.runs, [{ from: 0, to: 3, size: 8 }, { from: 3, to: 5, size: 8, pen: 2 }, { from: 5, to: 10, size: 8 }]);
+  style = Links.applyRun(style, 3, 5, { pen: null });
+  assert.deepEqual(style.runs, [{ from: 0, to: 10, size: 8 }]);                 // merged back
+  style = Links.applyRun(style, 8, 14, { size: 12 });
+  assert.deepEqual(style.runs, [{ from: 0, to: 8, size: 8 }, { from: 8, to: 14, size: 12 }]); // gap 10–14 filled
+  style = Links.applyRun(style, 0, 14, { size: null });
+  assert.deepEqual(style.runs, []);
+  assert.deepEqual(Links.paragraphStarts('ab\ncd\nef', 1, 4), [0, 3]);
+  style = Links.applyParagraph(style, [0, 3], { align: 'center' });
+  assert.deepEqual(style.paras, [{ at: 0, align: 'center' }, { at: 3, align: 'center' }]);
+  style = Links.applyParagraph(style, [3], { align: 'left' });
+  assert.deepEqual(style.paras, [{ at: 0, align: 'center' }]);
+});

@@ -11,12 +11,29 @@ const glyphLoading = new Map();
 
 let glyphPreview = null; // library id previewed on the paper (hover / 👁), never used for generation
 let glyphPreviewPinned = false;
+let hoverPreviewBlockedUntil = 0; // rows re-render under a still pointer after 👁: ignore that synthetic hover
 function previewSelection() {
   if (!glyphPreview || !glyphLibraries.has(glyphPreview)) return glyphSelection;
   return { ...glyphSelection, libraries: [glyphPreview, ...glyphSelection.libraries.filter((id) => id !== glyphPreview)], prefer: {}, pins: [] };
 }
 /** Generation always uses the saved selection; the paper preview may show a temporary library preview. */
 function glyphResolver({ preview = false } = {}) { return Glyphs.createResolver(preview ? previewSelection() : glyphSelection, glyphLibraries); }
+/** Formula glyphs: real lower-case letters / symbols first (the built-in Latin set writes lower case as capitals). */
+function mathGlyphFor() {
+  const selection = previewSelection();
+  const order = [...selection.libraries.filter((id) => id !== Glyphs.BUILTIN_ID), Glyphs.BUILTIN_ID];
+  const cache = new Map();
+  return (char) => {
+    if (cache.has(char)) return cache.get(char);
+    let found = null;
+    for (const id of order) {
+      const library = glyphLibraries.get(id), variant = library?.chars.get(char)?.[0];
+      if (variant) { found = { unitsPerEm: library.unitsPerEm, advance: variant.advance, strokes: variant.strokes }; break; }
+    }
+    cache.set(char, found);
+    return found;
+  };
+}
 function setGlyphPreview(id) {
   if (glyphPreview === id) return;
   glyphPreview = id;
@@ -168,7 +185,7 @@ function renderGlyphLibraries(locked) {
     row.setAttribute('role', 'listitem');
     row.dataset.id = id;
     // Hovering a library previews the whole paper in it (mouse); 👁 toggles the preview (touch / keyboard).
-    row.addEventListener('pointerenter', (event) => { if (event.pointerType === 'mouse' && glyphLibraries.has(id)) setGlyphPreview(id); });
+    row.addEventListener('pointerenter', (event) => { if (event.pointerType === 'mouse' && glyphLibraries.has(id) && !glyphPreviewPinned && performance.now() > hoverPreviewBlockedUntil) setGlyphPreview(id); });
     row.addEventListener('pointerleave', (event) => { if (event.pointerType === 'mouse' && !glyphPreviewPinned) setGlyphPreview(null); });
     const label = element('label', 'glyph-library-name');
     const check = element('input');
@@ -193,7 +210,7 @@ function renderGlyphLibraries(locked) {
       button('↑', '提高优先级', () => updateGlyphSelection((next) => { next.libraries.splice(index, 1); next.libraries.splice(index - 1, 0, id); }), locked || index === 0);
       button('↓', '降低优先级', () => updateGlyphSelection((next) => { next.libraries.splice(index, 1); next.libraries.splice(index + 1, 0, id); }), locked || index === selected.length - 1);
     }
-    if (entry) button(glyphPreviewPinned && glyphPreview === id ? '◉' : '👁', glyphPreviewPinned && glyphPreview === id ? '结束预览' : '在纸张上预览此字库', () => { const on = !(glyphPreviewPinned && glyphPreview === id); glyphPreviewPinned = on; setGlyphPreview(on ? id : null); renderGlyphPanel(); }, false);
+    if (entry) button(glyphPreviewPinned && glyphPreview === id ? '◉' : '👁', glyphPreviewPinned && glyphPreview === id ? '结束预览' : '在纸张上预览此字库', () => { const on = !(glyphPreviewPinned && glyphPreview === id); glyphPreviewPinned = on; hoverPreviewBlockedUntil = performance.now() + 800; setGlyphPreview(on ? id : null); renderGlyphPanel(); }, false);
     if (glyphLibraries.has(id)) button('⤓', '导出字库 JSON', () => exportGlyphLibrary(id), false);
     if (entry?.origin === 'user') button('×', '从本浏览器删除字库', () => deleteGlyphLibrary(id));
     row.append(label, actions, meta, librarySample(id));
@@ -370,15 +387,15 @@ function placementAt(event) {
   const x = (event.clientX - rect.left) / rect.width * layout.width;
   const y = (event.clientY - rect.top) / rect.height * layout.height;
   const page = currentPage();
-  return layout.placements?.find((item) => item.page === page && x >= item.x - .5 && x <= item.x + item.width + .5 && y >= item.y - .5 && y <= item.y + layout.size + .5);
+  return layout.placements?.find((item) => item.page === page && x >= item.x - .5 && x <= item.x + item.width + .5 && y >= item.y - .5 && y <= item.y + (item.size || layout.size) + .5);
 }
-$('#preview').addEventListener('click', (event) => {
-  if (glyphLocked()) return;
+// Clicking the paper places the caret (paper editor); right-click / long-press a character chooses its variant.
+$('#preview').addEventListener('contextmenu', (event) => {
   const placement = placementAt(event);
-  if (placement) openGlyphPicker(placement, event.clientX, event.clientY);
-  else closeGlyphPicker();
+  if (!placement || placement.kind === 'formula') return;
+  event.preventDefault();
+  if (!glyphLocked()) openGlyphPicker(placement, event.clientX, event.clientY);
 });
-$('#preview').addEventListener('pointermove', (event) => { $('#preview').style.cursor = placementAt(event) ? 'pointer' : ''; });
 document.addEventListener('pointerdown', (event) => { if (glyphPicker && !glyphPicker.contains(event.target) && event.target !== $('#preview')) closeGlyphPicker(); }, true);
 document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && glyphPicker) { event.preventDefault(); event.stopPropagation(); closeGlyphPicker(true); } }, true);
 window.addEventListener('workspace-view', () => closeGlyphPicker());

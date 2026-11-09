@@ -101,7 +101,7 @@
     const linkPath = Links.join(folder, `${name}.wtl`);
     if (known.has(linkPath)) throw Error(`已存在 ${linkPath}，请先重命名此文本`);
     const gcodeName = known.has(Links.join(folder, `${name}.gcode`)) ? `${Links.uniqueStem(known, folder, `${name}-程序`, ['.gcode'])}.gcode` : `${name}.gcode`;
-    doc.link = Links.normalizeLink({ text: Links.basename(doc.key), gcode: gcodeName, settings: config(), motion: motionSnapshot(), glyphs: glyphSelection }, linkPath);
+    doc.link = Links.normalizeLink({ text: Links.basename(doc.key), gcode: gcodeName, settings: config(), motion: motionSnapshot(), glyphs: glyphSelection, style: textStyle }, linkPath);
     if (!programDirty) Links.markSynced(doc.link, doc.text, doc.gcode, programSource);
     const oldKey = doc.key;
     Object.assign(doc, { kind: 'link', key: linkPath, paths: { text: doc.key, gcode: Links.join(folder, gcodeName), link: linkPath } });
@@ -167,7 +167,10 @@
     programDirty = doc?.programDirty || false;
     programSource = doc?.programSource || '';
     setGlyphSelection(link?.glyphs, content.value);
+    setTextStyle(link?.style, content.value);
     applyDrawing(doc);
+    // Formatting lives in the draft link; standalone text / program files have none.
+    $('.main-area').classList.toggle('no-format', doc?.kind !== 'link');
     content.scrollTop = 0; codeEditor.scrollTop = 0;
     const gcodeOnly = doc?.kind === 'gcode';
     for (const id of ['edit-tab', 'preview-tab']) $(`#${id}`).disabled = gcodeOnly;
@@ -191,7 +194,7 @@
     doc.programSource = programSource;
     if (doc.link) {
       // The current view is per-device UI state (kept in localStorage), not file content: no writes / conflicts on tab switches.
-      Object.assign(doc.link, { settings: config(), motion: motionSnapshot(), glyphs: glyphSelection });
+      Object.assign(doc.link, { settings: config(), motion: motionSnapshot(), glyphs: glyphSelection, style: textStyle });
       const placement = drawingPlacement();
       if (doc.link.drawing && placement) doc.link.drawing = { file: doc.link.drawing.file, ...placement };
       const sync = doc.link.sync, drawing = doc.drawingText || '';
@@ -655,9 +658,23 @@
     await guarded(async () => {
       let count = 0, first = '';
       for (const file of files) {
+        if (file.size > 20_000_000) throw Error(`${file.name} 文件过大`);
+        const ext = Links.extname(file.name);
+        if (ext === '.docx') {
+          // Word: text + formatting + page format; equations become \( … \) formulas.
+          const result = await Docx.parseDocx(await file.arrayBuffer(), manifest.machine.pens);
+          const stem = Links.uniqueStem(known, folder, Links.stem(file.name), ['.wtl', '.txt', '.gcode']);
+          await fsys.write(Links.join(folder, `${stem}.txt`), result.text, null);
+          const link = Links.normalizeLink({ settings: { ...defaults, ...result.settings }, motion: { ...motionDefaults }, style: result.style }, Links.join(folder, `${stem}.wtl`));
+          await fsys.write(Links.join(folder, `${stem}.wtl`), Links.serializeLink(link), null);
+          first = Links.join(folder, `${stem}.wtl`);
+          count++;
+          log(`已从 Word 导入「${stem}」：${Array.from(result.text).length} 字，${result.style.runs.length} 段字号 / 颜色格式，${(result.text.match(/\\\(/g) || []).length} 个公式。${result.warnings.join('；')}`);
+          await refreshTree();
+          continue;
+        }
         if (file.size > 6_000_000) throw Error(`${file.name} 文件过大`);
         const text = await file.text();
-        const ext = Links.extname(file.name);
         if (ext === '.json') {
           const raw = JSON.parse(text);
           if (raw?.format === Links.ARCHIVE_FORMAT) count += await importArchive(Links.normalizeArchive(raw), folder);
@@ -685,7 +702,7 @@
           const stem = Links.uniqueStem(known, folder, Links.stem(file.name), [ext, '.wtl']);
           await fsys.write(Links.join(folder, `${stem}${ext}`), text, null);
           first ||= Links.join(folder, `${stem}${ext}`);
-        } else throw Error(`${file.name}：只支持 .txt .md .gcode .nc .tap .svg .dxf 或工作区备份 .json`);
+        } else throw Error(`${file.name}：只支持 .txt .md .docx .gcode .nc .tap .svg .dxf 或工作区备份 .json`);
         known.add(first); count++;
         await refreshTree();
       }

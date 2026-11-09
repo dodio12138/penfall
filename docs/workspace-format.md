@@ -38,6 +38,7 @@
   "glyphs": { "libraries": ["builtin-latin"], "strategy": "first", "seed": 1, "prefer": {}, "pins": [] },
   "view": "editor",
   "drawing": { "file": "给妈妈.svg", "page": 1, "x": 20, "y": 20, "width": 120 },
+  "style": { "runs": [{ "from": 0, "to": 4, "size": 8 }, { "from": 10, "to": 14, "pen": 2 }], "paras": [{ "at": 0, "align": "center" }, { "at": 5, "indent": 10 }] },
   "sync": { "source": "generated", "textHash": "…", "paramsHash": "…", "gcodeHash": "…", "at": "2026-11-09T03:00:00.000Z" }
 }
 ```
@@ -45,6 +46,7 @@
 - `text` / `gcode`：同一文件夹中的文件名（不能含路径）。重命名或移动稿件时三个文件一起改。
 - `settings` / `motion` / `glyphs`：生成 G-code 用到的全部参数（排版、笔轴、笔起点、页码、选字，见 [glyph-format.md](glyph-format.md)）。
 - `drawing`（可选）：同一文件夹中的 `.svg` / `.dxf`，以及它在纸上的位置（`x` / `y` 为左上角距纸边 mm，`width` 为宽度 mm，`page` 为所在页）。图形文件的内容也计入梳串。
+- `style`（可选）：在纯文本之上的格式层。`runs` 是码点区间 `[from, to)` 的字号（mm）或用笔；`paras` 是段落起点 `at` 的对齐（`center` / `right`）和首行缩进（mm）。正文被编辑时，格式随文字平移。正文中的 `\( … \)` 是公式（LaTeX 写法）。格式也计入梳串。
 - `motion.text-pen` / `motion.pen`：正文用哪支笔、当前生成哪支笔（`all` 表示不换笔）。
 - `view`：只在第一次打开时作为默认视图；之后每台设备自己记住看的是哪一页，切换视图不会改写文件。
 - `sync`：上次「正文、参数、程序三者一致」时各自的哈希值，以及程序来源：`generated` 表示生成器输出，`manual` 表示手动编辑或导入的程序。

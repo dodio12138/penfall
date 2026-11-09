@@ -46,7 +46,7 @@ python -m venv .venv
 
 1. **正文**：纯文本、行号、光标位置。
 2. **G-code**：生成、直接编辑、导入、下载，错误提示与运行行选中。
-3. **纸张**：与生成结果一致的单线笔迹排版，按笔宽绘制；点击某个字可以选写法；多页时可翻页。
+3. **纸张**：可直接编辑的纸面，显示与生成结果一致的单线笔迹（按笔宽绘制）；右键某个字可以选写法；多页时可翻页。
 4. **刀轨**：XY 网格、空移虚线、落笔实线、运行着色、当前位置与代码行。支持滚轮缩放、拖动平移、适应视图复位，可按笔宽显示；静态预览不冒充机器实测位置。Z 值显示在位置栏，不提供 3D 视图。
 
 ### 响应式与控件规范
@@ -91,6 +91,13 @@ python -m venv .venv
 - 生成工具：`.venv/bin/python -m pip install -r tools/requirements.txt`，然后运行 `.venv/bin/python tools/skeleton_font.py 字体.ttf 输出.json --id … --name …`（`--chars` 可指定字符，`--preview` 可输出预览图）。可用于任何允许修改的字体。
 - `web/glyphs/demo-variants.json` 是由内置字形**程序变形**得到的演示库（`node tools/make-demo-glyphs.cjs` 生成），仅用于体验变体切换，不是真实手写。
 - 工作区备份不含字库；字库请在面板中单独导出。
+
+## 纸面编辑、格式与公式
+
+- **在纸面上直接编辑（像 Word 一样）**：「纸张」页就是编辑区，显示的就是最终的单线笔迹。点击放置光标，直接输入（支持中文输入法，候选框跟随光标）；可以拖动选择，↑↓ 按纸面上的实际行移动，Home / End 到行首行尾，PageUp / PageDown 跨页；打字超过一页会自动翻到下一页。撤销、复制粘贴、查找替换照常可用。右键（触屏长按）某个字可以选择它的写法。
+- **格式栏**：段落样式（正文 / 标题 1–3）、字号（mm）、用笔（多色）、左 / 中 / 右对齐、首行缩进、清除格式。选中文字时作用于所选内容，未选中时作用于光标所在段落。格式保存在稿件的 `.wtl` 中（`style`），`.txt` 仍是纯文本；编辑正文时格式跟着文字移动，在一段格式的末尾继续打字会沿用该格式。同一行可以混排不同字号（按底边对齐）。
+- **公式**：「∑ 公式」打开公式编辑器，有常用结构按钮和实时预览。使用 LaTeX 写法：分式 `\frac{a}{b}`、根式 `\sqrt{x}` / `\sqrt[3]{x}`、上下标 `x^{2}` / `a_{n}`、求和 `\sum_{i=1}^{n}`、积分 `\int_a^b`、极限 `\lim_{x\to 0}`、自动伸缩括号 `\left( … \right)`、`\text{…}`、希腊字母、常用运算和关系符号。公式在正文中以 `\( … \)` 保存，作为一个整体排版和书写；分式线、根号、伸缩括号直接用线条画出，其余字符取自字库。点击纸面上的公式可以修改或删除；有错误的公式会被标红，不能生成。
+- **导入 Word（.docx）**：保留段落、字号（最常用的字号作为基准，其余作为格式）、对齐、首行缩进、标题样式、文字颜色（映射到最接近的笔）、纸张大小 / 方向 / 页边距；Word 公式转换为上面的公式写法（分式、根式、上下标、求和积分、括号、函数）。表格按行转为文字（单元格之间用制表符分隔）；图片不会导入，导入时会给出提示（可以另存为 SVG 后作为图形添加）。
 
 ## 模板与版式背景
 
@@ -185,6 +192,9 @@ web/js/glyph-manager.js  字库加载 / 导入（IndexedDB）、字形面板、�
 web/js/path-engine.js    排版（预览与生成共用）、G-code 生成与解析（亦供 Node 测试）
 web/js/drawing.js        SVG / DXF → 毫米折线、颜色到笔的映射（DXF 部分亦供 Node 测试）
 web/js/templates.js      模板格式与内置模板（亦供 Node 测试）
+web/js/math.js           公式排版引擎：LaTeX 子集 → 单线笔画（亦供 Node 测试）
+web/js/docx.js           Word 导入（正文、格式、版面、公式）
+web/js/paper-editor.js   纸面编辑：光标、选区、键盘、格式栏、公式编辑器
 web/js/workspace-store.js  v3 工作区存储与校验（亦供 Node 测试）
 web/js/dialogs.js        页面内弹窗
 web/js/editor.js         正文编辑、纸张预览、视图切换、任务状态
@@ -211,7 +221,7 @@ node --test tests/*.test.js
 
 单元测试包含字形生成、中文拒绝、边界、相对 / 英寸 / 圆弧解析、工作区读写、坏数据保护、配额失败、版本冲突、严格硬件指令验证、模拟控制器应答 / 错误、单读线程与状态交错、分片报告、单位换算、WCO / G92 / TLO 一致性、过期 / 复位失效、G54–G59 切换及 X/Y 设零读回、迟到应答隔离、任务基准变化 / 暂停故障锁释放、机器行程变换、HTTP 密钥与跨来源限制。
 
-浏览器回归脚本为 `tests/workspace.browser.cjs`，需要在测试环境安装 Playwright 并启动 Web 服务。执行 `node tests/workspace.browser.cjs`（笔起点回归：`node tests/origin.browser.cjs`；模板：`node tests/templates.browser.cjs`；图形与多色：`node tests/drawing.browser.cjs`；多页：`node tests/pages.browser.cjs`；字形回归：`node tests/glyphs.browser.cjs`；若 Playwright 浏览器版本不匹配，可设 `CHROME_PATH` 使用本机 Chrome）；可设置 `TEST_URL`、`CHROME_PATH`（使用本机 Chrome）和 `SCREENSHOT`。测试使用独立浏览器上下文，不触碰日常浏览器数据。覆盖文稿 / G-code / 参数隔离、改名复制删除、筛选、查找替换、刷新恢复、备份合并、TXT 原文下载、关闭重开、缩放复位、尺寸调整及跨标签页冲突恢复。
+浏览器回归脚本为 `tests/workspace.browser.cjs`，需要在测试环境安装 Playwright 并启动 Web 服务。执行 `node tests/workspace.browser.cjs`（笔起点回归：`node tests/origin.browser.cjs`；纸面编辑 / 公式 / Word：`node tests/rich.browser.cjs`；模板：`node tests/templates.browser.cjs`；图形与多色：`node tests/drawing.browser.cjs`；多页：`node tests/pages.browser.cjs`；字形回归：`node tests/glyphs.browser.cjs`；若 Playwright 浏览器版本不匹配，可设 `CHROME_PATH` 使用本机 Chrome）；可设置 `TEST_URL`、`CHROME_PATH`（使用本机 Chrome）和 `SCREENSHOT`。测试使用独立浏览器上下文，不触碰日常浏览器数据。覆盖文稿 / G-code / 参数隔离、改名复制删除、筛选、查找替换、刷新恢复、备份合并、TXT 原文下载、关闭重开、缩放复位、尺寸调整及跨标签页冲突恢复。
 
 响应式和下拉回归为 `tests/ui.browser.cjs`，同样使用 Playwright。覆盖 320、360、390、600、768、844、1024、1280、1920、2560px 宽度，包括手机横屏、四个工作分页、九文稿长名称、无顶部横向滚动条、键盘操作、弹窗内下拉边界、触屏长选项、禁用状态同步及纸张自适应。设置 `SCREENSHOT_DIR` 可保存各尺寸截图。测试是浏览器视口 / 触屏模拟，不代表已经实测所有型号手机或浏览器。
 

@@ -24,7 +24,7 @@
     const bottom = height - margin;
     const chars = Array.from(text);
     const count = chars.length;
-    const placements = [], missing = new Set(), carets = new Array(count + 1);
+    const placements = [], missing = new Set(), carets = new Array(count + 1), formulaErrors = [];
     // Per-character size / pen from formatting runs; per-paragraph alignment / indent.
     const sizes = new Float64Array(count).fill(baseSize), pens = new Int8Array(count);
     for (const run of options.format?.runs || []) for (let i = Math.max(0, run.from); i < Math.min(count, run.to); i++) { if (run.size > 0) sizes[i] = run.size; if (run.pen > 0) pens[i] = run.pen; }
@@ -80,6 +80,8 @@
         const formula = formulas.get(index);
         if (formula) {
           const box = options.math(formula.source, sizes[index], index);
+          for (const char of box.missing || []) missing.add(char);
+          if (box.error) formulaErrors.push({ index, source: formula.source, message: box.error });
           items.push({ kind: 'formula', index, end: formula.end, width: box.width, ascent: box.height, descent: box.depth, size: sizes[index], pen: pens[index], box });
           index = formula.end - 1;
           continue;
@@ -133,7 +135,7 @@
       start = end + 1;
     }
     for (let i = 0; i <= count; i++) if (!carets[i]) carets[i] = carets[i - 1] || { page: 1, x: left(1), y: margin, height: baseSize };
-    return { placements, carets, missing: [...missing], overflow, pages: page };
+    return { placements, carets, missing: [...missing], formulaErrors, overflow, pages: page };
   }
 
   const BACKGROUNDS = ['none', 'lines', 'four-line', 'grid', 'tianzige', 'mizige', 'composition'];
@@ -224,6 +226,7 @@
     const pen = options.pen === undefined || options.pen === 'all' ? null : Number(options.pen);
     const textPen = options.textPen || 1;
     if (result.missing.length) throw Error(`字库暂不支持：${result.missing.slice(0,20).join(' ')}${result.missing.length > 20 ? ` 等 ${result.missing.length} 个字` : ''}。请在「字形」面板启用含这些字的字库，或导入外部生成的 G-code；不能用系统字体冒充笔迹。`);
+    if (result.formulaErrors?.length) throw Error(`公式有误：${result.formulaErrors[0].message}（${result.formulaErrors[0].source}）`);
     if (!text.trim() && !drawings.length) throw Error('请先输入书写内容或添加图形。');
     if (result.overflow) throw Error(`内容超过 ${MAX_PAGES} 页上限，请拆分文稿。`);
     const page = options.page === undefined ? 1 : options.page;

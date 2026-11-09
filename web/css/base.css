@@ -268,3 +268,27 @@ body.sidebar-hidden .sidebar { display: none; }
 .template-card svg .sample { stroke: #30343a; stroke-width: .6; fill: none; }
 .template-card strong { font-size: 12px; font-weight: 600; }
 .template-card span { color: var(--muted); font-size: 10px; line-height: 1.5; }
+
+/* Word-like formatting bar and paper editing */
+.format-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 6px 14px; border-bottom: 1px solid var(--border-subtle); background: var(--surface); flex-shrink: 0; }
+.format-bar .ui-select { width: auto; min-width: 92px; }
+.format-bar .select-trigger, .format-bar button { min-height: 28px; padding: 3px 8px; font-size: 12px; }
+.format-group { display: inline-flex; }
+.format-group button + button { border-left-width: 0; }
+.format-bar button[aria-pressed=true] { background: var(--selected); border-color: var(--accent); }
+.format-hint { margin-left: auto; color: var(--quiet); font-size: 10px; }
+.paper-sheet { position: relative; margin: auto; width: max-content; }
+.paper-sheet canvas#preview { cursor: text; }
+.paper-stage canvas#preview-overlay { position: absolute; inset: 0; margin: 0; background: transparent; box-shadow: none; pointer-events: none; }
+#paper-caret { position: absolute; width: 2px; background: #1766aa; pointer-events: none; }
+.paper-sheet:focus-within #paper-caret { animation: caret-blink 1.06s steps(1) infinite; }
+@keyframes caret-blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .paper-sheet:focus-within #paper-caret { animation: none; } }
+.paper-sheet textarea#content { position: absolute; width: 2px; min-height: 0; height: 1.2em; padding: 0; border: 0; opacity: 0; resize: none; overflow: hidden; white-space: pre; caret-color: transparent; font-size: 16px; line-height: 1; pointer-events: none; z-index: 2; }
+.no-format .format-bar, .gcode-only .format-bar { display: none !important; }
+#formula-dialog { width: min(640px, calc(100vw - 24px)); }
+.formula-palette { display: flex; flex-wrap: wrap; gap: 4px; margin: 12px 0; }
+.formula-palette button { min-height: 28px; padding: 2px 8px; font-size: 12px; }
+#formula-source { width: 100%; min-height: 64px; margin-top: 6px; padding: 8px; border: 1px solid var(--border); background: var(--control); font: 14px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; resize: vertical; }
+.formula-preview-wrap { display: grid; place-items: center; min-height: 120px; margin-top: 10px; background: #fff; overflow: auto; }
+#formula-error { margin: 8px 0 0; color: var(--danger); }
