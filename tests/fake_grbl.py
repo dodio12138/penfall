@@ -68,6 +68,10 @@ class FakeGRBL:
         if self.locked_until_reset:
             return  # critical alarm: GRBL ignores commands until reset
         code = payload.decode().strip()
+        if code == '$1=255':
+            self.step_idle = 255
+            self.emit('ok')
+            return
         if code == '$X':
             if self.machine_state == 'Alarm':
                 self.machine_state = 'Idle'
@@ -83,7 +87,7 @@ class FakeGRBL:
             self.emit('error:20')
             return
         if code == '$$':
-            for line in [f'$13={int(self.report_inches)}','$22=1','$130=300','$131=300','$132=30']:
+            for line in [f'$1={getattr(self, "step_idle", 25)}',f'$13={int(self.report_inches)}','$22=1','$130=300','$131=300','$132=30']:
                 self.emit(line)
         elif code == '$G':
             self.emit(f'[GC:G0 {self.wcs} G17 G21 G90 G94 M5 M9 T0 S0 F100]')

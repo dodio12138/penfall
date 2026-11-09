@@ -502,6 +502,13 @@ class Handler(SimpleHTTPRequestHandler):
                         raise ValueError('未连接或有任务运行，不能点动')
                     limits = data.get('limits') if isinstance(data.get('limits'), dict) else {}
                     SESSION.jog(data.get('axis'), data.get('distance'), data.get('feed'), {key: limits[key] for key in limits if key in ('xmin', 'xmax', 'ymin', 'ymax', 'zmin', 'zmax')})
+                elif self.path == '/api/settings/hold-motors':
+                    if SESSION is None or live:
+                        raise ValueError('未连接或有任务运行')
+                    if data.get('reviewed') is not True:
+                        raise ValueError('必须确认修改控制器设置')
+                    SESSION.hold_motors()
+                    update(message='已设置 $1=255：电机保持通电')
                 elif self.path == '/api/unlock':
                     if SESSION is None or live:
                         raise ValueError('未连接或有任务运行')

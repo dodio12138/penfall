@@ -272,3 +272,23 @@ class Jogging(unittest.TestCase):
         self.session.jog_cancel()
         self.assertEqual(self.board.writes[-1:],[b'\x85'])
         self.assertFalse(any(write.startswith(b'$J') for write in self.board.writes))
+
+
+class HoldMotors(unittest.TestCase):
+    def test_step_idle_is_reported_and_hold_writes_only_dollar_one(self):
+        board=FakeGRBL();session=Session(board)
+        try:
+            session.refresh()
+            self.assertEqual(session.snapshot()['stepIdle'],25)
+            before=len(board.writes)
+            session.hold_motors()
+            self.assertEqual(session.snapshot()['stepIdle'],255)
+            settings=[w for w in board.writes[before:] if w.startswith(b'$') and b'=' in w]
+            self.assertEqual(settings,[b'$1=255\n'])
+            board.machine_state='Run'
+            session.status()
+            with self.assertRaisesRegex(ProtocolError,'Idle'):
+                session.hold_motors()
+        finally:
+            session.close()
+

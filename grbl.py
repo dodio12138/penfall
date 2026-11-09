@@ -181,6 +181,9 @@ class Coordinates:
                     homingEnabled=None if 22 not in self.settings else bool(self.settings[22]),
                     alarm=bool((self.machine_state or '').startswith('Alarm') or (self.fault or '').startswith('ALARM:')),
                     resetRequired=self.reset_required,
+                    # $1 step idle delay (ms): below 255 the steppers switch off after each move, and a spring-loaded
+                    # Z axis is pulled back while the controller still believes it is where it stopped.
+                    stepIdle=self.settings.get(1),
                     travel=[self.settings.get(key) for key in (130,131,132)])
 
 
@@ -454,6 +457,19 @@ class Session:
         """Realtime jog cancel (0x85): stops the current jog and drops queued ones; harmless when idle."""
         self.realtime(b'\x85')
         self.jog_target = None
+
+    def hold_motors(self):
+        """Write $1=255 (steppers always enabled) and read it back. The only firmware setting this app writes;
+        stored by the controller (EEPROM / flash), so it stays after power-off."""
+        with self.reserve('settings', timeout=1):
+            data = self.model.snapshot()
+            if (data['machineState'] or '').split(':')[0] != 'Idle':
+                raise ProtocolError('控制器不是 Idle，不能修改设置')
+            self.command('$1=255', timeout=3)
+            self.command('$$', timeout=3)
+            if self.model.settings.get(1) != 255:
+                raise ProtocolError('写入后读回的 $1 不是 255，未确认')
+            return self.status(timeout=3)
 
     def _poll(self):
         last_modal = time.monotonic()

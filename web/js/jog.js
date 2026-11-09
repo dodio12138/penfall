@@ -40,6 +40,11 @@
     $('#jog-note').textContent = note;
     $('#jog-note').classList.toggle('warning', Boolean(lastError) || Boolean(missing.length && !reason));
     const state = window.Coordinates?.snapshot()?.machineState?.split(':')[0];
+    // $1 < 255: the steppers switch off after each move and the spring pulls Z back unnoticed.
+    const idle = hardware.coordinates?.stepIdle, warnIdle = bridgeHealthy && hardware.connected && Number.isFinite(idle) && idle !== 255;
+    $('#hold-note').hidden = $('#hold-motors').hidden = !warnIdle;
+    if (warnIdle) $('#hold-note').textContent = `电机空闲 ${idle} ms 后会断电（$1=${idle}）。Z 轴有弹簧时，断电后弹簧会把笔拉回，控制器却不知道，Z 位置就丢了：点动后弹回、落笔深度不准都是这个原因。`;
+    $('#hold-motors').disabled = Boolean(reason) || busy;
     $('#jog-state').textContent = holding ? `${holding.axis}${holding.dir > 0 ? '+' : '−'} 移动中` : state === 'Jog' ? '点动中' : reason ? '不可用' : '就绪';
   }
   async function jog(axis, distance) {
@@ -103,6 +108,19 @@
   // Leaving the page or switching windows while holding must never leave the machine moving.
   for (const type of ['blur', 'pagehide']) window.addEventListener(type, stopHold);
   document.addEventListener('visibilitychange', () => { if (document.hidden) stopHold(); });
+  $('#hold-motors').addEventListener('click', async () => {
+    if (busy || blocked()) return;
+    if (!await AppDialogs.confirm({ title: '保持电机通电', confirmLabel: '写入 $1=255', message: '将把控制器设置 $1（电机空闲延时）改为 255：步进电机一直通电，弹簧不能再把 Z 拉回。这项设置保存在控制器里，断电后仍然有效；电机会一直保持通电，略微发热、可能有轻微电流声。写入后会读回确认。之前测量的落笔高度可能受弹回影响，请重新点动测量。' })) return;
+    busy = true; render();
+    try {
+      applyHardware(await api('settings/hold-motors', { reviewed: true }));
+      lastError = '';
+      log('已写入 $1=255 并读回确认：电机保持通电。请重新点动测量笔尖接触纸面的 Z。');
+    } catch (error) {
+      lastError = `设置未成功：${error.message}`;
+      if (error.bridgeState) applyHardware(error.bridgeState); else if (!error.httpStatus) bridgeUnavailable(error);
+    } finally { busy = false; render(); }
+  });
   $('#jog-stop').addEventListener('click', () => { if (holding) stopHold(); else cancel(); });
   for (const id of ['jog-feed', 'jog-step', 'jog-mode']) $(`#${id}`).addEventListener('input', () => { lastError = ''; render(); });
   for (const axis of 'xyz') for (const bound of ['min', 'max']) $(`#travel-${axis}-${bound}`).addEventListener('input', render);

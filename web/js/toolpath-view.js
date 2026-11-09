@@ -96,6 +96,83 @@ function drawPaper(ctx, view, color) {
   ctx.fillText('笔零点', zx + 9, zy + 16);
   ctx.restore();
 }
+// ---------- Z side view: the pen seen from the side during a run ----------
+const Z_WINDOW_SECONDS = 4;
+const segmentEndTimes = new WeakMap();
+/** End time (s) of every segment, estimated like the simulation (feed rates, travel at SIM_RAPID_FEED). */
+function endTimes(path) {
+  if (!segmentEndTimes.has(path)) {
+    let t = 0;
+    segmentEndTimes.set(path, path.segments.map((segment) => (t += segment.distance / ((segment.rapid ? SIM_RAPID_FEED : segment.feed) / 60))));
+  }
+  return segmentEndTimes.get(path);
+}
+/**
+ * Last seconds of pen height (left) and the pen above the paper (right). Z pens show real Z; servo pens show the
+ * pen state. "Up" on screen is always away from the paper, whichever way the machine's +Z points.
+ */
+function drawZView(index, fraction, current, color, show) {
+  const canvas = $('#z-view');
+  canvas.hidden = !show;
+  if (!show) return;
+  const w = canvas.clientWidth || 300, h = canvas.clientHeight || 130, dpr = Math.min(devicePixelRatio || 1, 2);
+  if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) { canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr); }
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  const servo = $('#pen-mode').value !== 'z';
+  const up = servo ? 1 : Number($('#pen-up').value), down = servo ? 0 : Number($('#pen-down').value);
+  const away = Math.sign(up - down) || 1; // screen-up = away from the paper
+  const value = (segment, point) => servo ? (segment.drawing ? down : up) : point.z;
+  const values = servo ? [up, down] : [up, down, toolpath.bounds.minZ, toolpath.bounds.maxZ];
+  const low = Math.min(...values.map((v) => v * away)), high = Math.max(...values.map((v) => v * away));
+  const pad = Math.max(.3, (high - low) * .12);
+  const top = 46, bottom = h - 14, plotLeft = 8, plotRight = w - 78;
+  const y = (v) => bottom - (v * away - (low - pad)) / (high - low + 2 * pad) * (bottom - top);
+  const times = endTimes(toolpath), segment = toolpath.segments[index];
+  const start = index ? times[index - 1] : 0, now = start + (times[index] - start) * fraction;
+  const x = (t) => plotRight - (now - t) / Z_WINDOW_SECONDS * (plotRight - plotLeft);
+  ctx.font = '10px ui-monospace, monospace';
+  ctx.fillStyle = color('--muted');
+  ctx.fillText(`侧视 · 最近 ${Z_WINDOW_SECONDS} 秒`, 8, 13);
+  // Pen-up and pen-down levels.
+  ctx.lineWidth = 1;
+  for (const level of [up, down]) {
+    ctx.strokeStyle = color('--border'); ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.moveTo(plotLeft, Math.round(y(level)) + .5); ctx.lineTo(w - 6, Math.round(y(level)) + .5); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  // History, oldest first: segments that ended inside the window, the current one up to "now". Each segment is
+  // joined to the previous one, so servo up / down steps show as vertical moves.
+  const recent = [];
+  for (let i = index; i >= 0 && times[i] >= now - Z_WINDOW_SECONDS; i--) recent.unshift(i);
+  ctx.lineWidth = 1.5;
+  let previous = null;
+  for (const i of recent) {
+    const item = toolpath.segments[i], from = i ? times[i - 1] : 0, part = i === index ? fraction : 1;
+    const startX = x(Math.max(from, now - Z_WINDOW_SECONDS)), startY = y(value(item, item.from));
+    const endY = y(value(item, item.from) + (value(item, item.to) - value(item, item.from)) * part);
+    ctx.strokeStyle = color(item.drawing ? '--success' : '--path-travel');
+    ctx.beginPath(); ctx.moveTo(...(previous || [startX, startY])); ctx.lineTo(startX, startY); ctx.lineTo(x(from + (times[i] - from) * part), endY); ctx.stroke();
+    previous = [x(from + (times[i] - from) * part), endY];
+  }
+  // Level labels on top of the curve, on a background so they stay readable.
+  for (const [level, label] of [[up, servo ? '抬笔' : `抬笔 Z${+up.toFixed(2)}`], [down, servo ? '落笔' : `落笔 Z${+down.toFixed(2)}`]]) {
+    const ly = y(level) + (level === down ? 12 : -4), width = ctx.measureText(label).width;
+    ctx.fillStyle = color('--surface'); ctx.fillRect(plotLeft, ly - 10, width + 6, 13);
+    ctx.fillStyle = color('--quiet'); ctx.fillText(label, plotLeft + 3, ly);
+  }
+  // The pen above the paper (paper surface drawn at the pen-down level).
+  const penX = w - 40, tip = y(servo ? (segment.drawing ? down : up) : current.z), paper = y(down);
+  ctx.fillStyle = '#d9d4c7'; ctx.fillRect(penX - 26, paper, 52, 4);
+  ctx.fillStyle = color('--text'); ctx.strokeStyle = color('--text');
+  ctx.beginPath(); ctx.moveTo(penX, tip); ctx.lineTo(penX - 4, tip - 7); ctx.lineTo(penX + 4, tip - 7); ctx.closePath(); ctx.fill();
+  ctx.fillRect(penX - 4, tip - 40, 8, 33);
+  ctx.fillStyle = color(segment.drawing ? '--success' : '--muted');
+  ctx.textAlign = 'right';
+  ctx.fillText(servo ? (segment.drawing ? '落笔' : '抬笔') : `Z ${current.z.toFixed(2)}`, penX - 12, 13);
+  ctx.textAlign = 'left';
+}
 function drawToolpath() {
   // The stale warning must be correct even before the (animation-frame) redraw.
   $('#path-stale').hidden = !programDirty || !toolpath.segments.length;
@@ -117,7 +194,7 @@ function drawToolpath() {
   ctx.fillRect(0, 0, w, h);
   $('#path-empty').hidden = toolpath.segments.length > 0;
   $('#path-zoom').textContent = `${Math.round(pathCamera.zoom * 100)}%`;
-  if (!toolpath.segments.length) { $('#path-position').hidden = true; return; }
+  if (!toolpath.segments.length) { $('#path-position').hidden = true; $('#z-view').hidden = true; return; }
 
   const view = pathTransform(w, h);
   drawGrid(ctx, view, w, h, color);
@@ -148,14 +225,16 @@ function drawToolpath() {
     ctx.stroke();
   }
   ctx.setLineDash([]);
+  let currentIndex = -1, currentFraction = 0;
   if (active) {
-    for (const segment of toolpath.segments) {
+    for (const [index, segment] of toolpath.segments.entries()) {
       let fraction = 0;
       if (hardwareJob && traceVerified) fraction = acknowledgedLine && segment.line <= acknowledgedLine ? 1 : 0;
       else if (!hardwareJob) fraction = Math.max(0, Math.min(1, (pathDistance - (segment.length - segment.distance)) / segment.distance));
       if (fraction <= 0) break;
       current = Object.fromEntries(['x', 'y', 'z'].map((axis) => [axis, segment.from[axis] + (segment.to[axis] - segment.from[axis]) * fraction]));
       currentLine = segment.line;
+      currentIndex = index; currentFraction = fraction;
       if (segment.drawing || showTravel) {
         ctx.strokeStyle = color(segment.drawing ? '--success' : '--accent');
         ctx.lineWidth = segment.drawing ? inkWidth || 2 : 1;
@@ -168,6 +247,7 @@ function drawToolpath() {
     ctx.strokeStyle = color('--warning'); ctx.lineWidth = 1;
     ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI * 2); ctx.moveTo(px - 10, py); ctx.lineTo(px + 10, py); ctx.moveTo(px, py - 10); ctx.lineTo(px, py + 10); ctx.stroke();
   }
+  drawZView(currentIndex, currentFraction, current, color, active && (!hardwareJob || traceVerified) && currentIndex >= 0 && $('#show-z-view').checked);
   $('#path-position').hidden = !active;
   $('#path-position').textContent = hardwareJob && !traceVerified ? '其他会话任务，无法关联轨迹' : !active ? '' : `${hardwareJob ? '已应答目标（非实测）' : '模拟位置'} · X ${current.x.toFixed(2)} · Y ${current.y.toFixed(2)} · Z ${current.z.toFixed(2)} mm${currentLine ? ` · 第 ${currentLine} 行` : ''}`;
   $('#path-stats').title = '轨迹长度包含抬落笔 Z 运动；模拟空移按 3000 mm/min 估算，不包含加减速。';
@@ -178,6 +258,8 @@ new ResizeObserver(() => requestDraw()).observe($('.path-stage'));
 $('#show-travel').addEventListener('change', drawToolpath);
 $('#show-pen-width').checked = localStorage.getItem('penfall:show-pen-width') === '1';
 $('#show-pen-width').addEventListener('change', () => { try { localStorage.setItem('penfall:show-pen-width', $('#show-pen-width').checked ? '1' : '0'); } catch { /* optional */ } drawToolpath(); });
+$('#show-z-view').checked = localStorage.getItem('penfall:show-z-view') !== '0';
+$('#show-z-view').addEventListener('change', () => { try { localStorage.setItem('penfall:show-z-view', $('#show-z-view').checked ? '1' : '0'); } catch { /* optional */ } drawToolpath(); });
 $('#fit-path').addEventListener('click', () => { resetPathCamera(); drawToolpath(); });
 (() => {
   const canvas = $('#toolpath');

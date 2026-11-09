@@ -44,3 +44,7 @@ button.hardware-button:hover:not(:disabled) { background: #4b3e2a; border-color:
   .code-actions { display: flex; }
   #code-state { flex-basis: 100%; font-size: 10px; }
 }
+
+/* Z side view: pen height over the last seconds of the run, and the pen above the paper. */
+#z-view, .path-stage canvas#z-view { position: absolute; inset: auto 12px 44px auto; width: 300px; height: 130px; cursor: default; background: var(--surface); border: 1px solid var(--border); pointer-events: none; }
+@media (max-width: 600px) { .path-stage canvas#z-view { width: 220px; height: 110px; right: 8px; } }
