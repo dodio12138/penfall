@@ -18,6 +18,33 @@ MACHINE = dict(xmin=-300,xmax=0,ymin=-300,ymax=0,zmin=-30,zmax=0)
 
 
 class BridgeValidation(unittest.TestCase):
+    def test_identify_grbl_by_banner_or_read_only_query(self):
+        class Board:
+            def __init__(self, banner=(), answers=None):
+                self.lines, self.answers, self.sent = [line + '\n' for line in banner], answers or {}, b''
+            def readline(self):
+                if self.lines:
+                    return self.lines.pop(0).encode()
+                time.sleep(.005)
+                return b''
+            def write(self, data):
+                self.sent += data
+                for key, lines in self.answers.items():
+                    if key in data:
+                        self.lines += [line + '\n' for line in lines]
+            def reset_input_buffer(self):
+                self.lines = []
+        banner = Board(["Grbl 1.1h ['$' for help]"])
+        self.assertEqual(bridge.identify_grbl(banner, .1, .1), '1.1h')
+        self.assertEqual(banner.sent, b'', 'nothing is sent when the banner arrives')
+        quiet = Board(answers={b'$I': ['[VER:1.1f.20170801:]', '[OPT:V,15,128]', 'ok']})
+        self.assertEqual(bridge.identify_grbl(quiet, .1, .1), '1.1f')
+        self.assertEqual(quiet.sent, b'\r\n$I\n', 'only the read-only $I query')
+        self.assertEqual(quiet.lines, [], 'the rest of the $I answer is dropped')
+        for board, reason in [(Board(), '没有任何回应'), (Board(['Grbl 0.9j']), '0.9j'), (Board(answers={b'$I': ['echo:Unknown command']}), 'Unknown command')]:
+            with self.subTest(reason=reason), self.assertRaisesRegex(ValueError, reason):
+                bridge.identify_grbl(board, .1, .1)
+
     def test_servo_profile_allows_only_its_pen_commands(self):
         pen = dict(mode='servo-m5', down=30, dwell=.15)
         lines = ['G21', 'G90', 'M5', 'G4 P0.15', 'G0 X1 Y1', 'M3 S30', 'G4 P0.15', 'G1 X2 Y2 F1200', 'M5']

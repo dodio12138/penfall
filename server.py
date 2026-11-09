@@ -96,6 +96,44 @@ def snapshot():
     return result
 
 
+def identify_grbl(board, banner_wait=3, query_wait=2):
+    """GRBL 1.1 version of the controller, or ValueError saying what was received.
+
+    Boards that reset when the port opens print "Grbl 1.1h ['$' for help]". Many do not (no auto-reset circuit,
+    ESP32 boards, controller already running): then ask with the read-only build-info query $I (-> [VER:1.1h...]).
+    Nothing else is sent: no reset, no unlock, no motion."""
+    seen = []
+    def read_until(deadline, pattern):
+        while time.monotonic() < deadline:
+            line = board.readline().decode('ascii', errors='replace').strip()
+            if line:
+                seen.append(line)
+                match = re.match(pattern, line)
+                if match:
+                    return match[1]
+        return None
+    version = read_until(time.monotonic()+banner_wait, r'^Grbl (\S+)')
+    if version is None:
+        board.write(b'\r\n$I\n')
+        version = read_until(time.monotonic()+query_wait, r'^\[VER:([^.:\]]+\.[^.:\]]+)')
+        # Let the rest of the $I answer ([OPT:...], ok) arrive, then drop it so it is not taken as a reply later.
+        time.sleep(.3)
+        board.reset_input_buffer()
+    if version and version.startswith('1.1'):
+        return version
+    received = ' / '.join(seen)[:160]
+    garbled = received and sum(ch.isprintable() for ch in received) < .8 * len(received)
+    if not seen:
+        hint = '控制器没有任何回应：请检查串口是否选对、波特率是否正确，或该机器是否使用专用协议'
+    elif garbled:
+        hint = f'收到的是乱码（{received!r}），波特率很可能不对，请换一个波特率重试'
+    elif version:
+        hint = f'控制器报告的是 GRBL {version}（收到：{received}），只支持 GRBL 1.1'
+    else:
+        hint = f'收到：{received}。这不是 GRBL 1.1 的回应，可用 tools/serial_probe.py 识别固件'
+    raise ValueError(f'未检测到标准 GRBL 1.1，拒绝连接。{hint}')
+
+
 def pen_profile(pen):
     """Servo pen lift sent with a job: {'mode': 'servo-m5' | 'servo-s', 'down': S, 'up': S | None, 'dwell': seconds}."""
     if pen is None:
@@ -412,15 +450,7 @@ class Handler(SimpleHTTPRequestHandler):
                     board = serial.Serial(data['port'], baud, timeout=.1, write_timeout=2, exclusive=True)
                     session = None
                     try:
-                        deadline, version = time.monotonic()+3, None
-                        while time.monotonic() < deadline:
-                            line = board.readline().decode('ascii', errors='replace')
-                            match = re.match(r'^Grbl (\S+)', line)
-                            if match:
-                                version = match[1]
-                                break
-                        if not version or not version.startswith('1.1'):
-                            raise ValueError('未检测到标准 GRBL 1.1 标识，拒绝连接；请核实固件')
+                        version = identify_grbl(board)
                         session = Session(board, version)
                         message = 'GRBL 1.1 已连接'
                         try:
