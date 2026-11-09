@@ -234,3 +234,22 @@ body.sidebar-hidden .sidebar { display: none; }
 .glyph-sample .glyph-thumb { stroke-width: 1.3; }
 .glyph-library.previewing { border-color: var(--accent); }
 #paper-mode { max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Pens / drawings */
+.pen-heading { display: flex; align-items: center; justify-content: space-between; margin: 4px 0 6px; font-size: 12px; color: var(--muted); }
+.pen-heading button { min-height: 26px; padding: 2px 8px; font-size: 11px; }
+#pen-list { display: grid; gap: 4px; margin-bottom: 12px; }
+.pen-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) 40px 28px; gap: 4px; align-items: center; }
+.pen-number { color: var(--muted); font: 11px ui-monospace, monospace; text-align: center; }
+.pen-row input { margin: 0 !important; min-height: 28px; padding: 3px 7px; font-size: 12px; }
+.pen-row input[type=color] { padding: 2px; height: 28px; cursor: pointer; }
+.pen-row button { min-height: 28px; padding: 0; }
+.pen-chip { display: inline-flex; align-items: center; gap: 5px; margin-right: 8px; font-size: 11px; color: var(--muted); white-space: nowrap; }
+.pen-chip::before { content: ''; width: 10px; height: 10px; background: var(--pen); border: 1px solid #ffffff40; }
+#pen-legend { margin-left: auto; margin-right: 12px; }
+.drawing-legend { display: flex; flex-wrap: wrap; gap: 4px 0; margin-bottom: 10px; }
+.drawing-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.drawing-actions button { font-size: 11px; padding-inline: 8px; }
+#drawing-remove { color: var(--danger); }
+.drawing-file { margin: 0 0 8px !important; overflow-wrap: anywhere; }
+.pen-picker { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.pen-picker .ui-select { width: 120px; }

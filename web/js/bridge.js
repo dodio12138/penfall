@@ -20,7 +20,7 @@ function refreshSendButton() {
   const noDocument = Boolean(window.Workspace && (!window.Workspace.activeId || window.Workspace.blocked));
   const invalid = toolpath.errors.length > 0 || !toolpath.segments.length || noDocument;
   // Simulation 梳串s first and can generate the program from the text, so text alone is enough to start.
-  const regenerable = !noDocument && !content.disabled && content.value.trim() && (programSource === 'generated' || !codeEditor.value.trim());
+  const regenerable = !noDocument && (content.value.trim() || layout.paths?.length) && (programSource === 'generated' || !codeEditor.value.trim());
   const busy = hardwareJob || controllerBusy() || simulation.state === 'running' || simulation.state === 'paused';
   $('#start').disabled = busy || (invalid && !regenerable);
   $('#send-job').disabled = !bridgeHealthy || !hardware.connected || !window.Coordinates?.canSend() || busy || invalid;

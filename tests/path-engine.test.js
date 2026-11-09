@@ -75,3 +75,17 @@ test('long text flows onto further pages; each page is generated separately', ()
   assert.equal(first.bounds.maxY,second.bounds.maxY);
   assert.throws(()=>generate(text,{...options,page:layout.pages+1}),/页码无效/);
 });
+
+test('drawing paths are placed on their page, filtered by pen, and ordered to reduce travel', () => {
+  const paths=[{page:1,pen:2,points:[[50,50],[60,50]]},{page:1,pen:1,points:[[100,100],[90,100]]},{page:2,pen:2,points:[[20,20],[30,30]]}];
+  const red=generate('HI',{...options,paths,pen:2,textPen:1});
+  assert.doesNotMatch(red,/G0 X20 Y277/);               // the text belongs to pen 1
+  assert.match(red,/G0 X50 Y247\n/);                    // pen-2 drawing on page 1 (y flipped: 297 - 50)
+  assert.doesNotMatch(red,/X100 Y197/);                  // pen-1 drawing excluded
+  assert.match(generate('',{...options,paths,pen:2,page:2}),/; Page 2 of 2; pen 2/);
+  const all=parse(generate('HI',{...options,paths}));
+  assert.deepEqual(all.errors,[]);
+  assert.throws(()=>generate('',{...options}),/书写内容或添加图形/);
+  const ordered=require('../web/js/path-engine.js').orderPaths([[[10,0],[0,0]],[[11,0],[20,0]]]);
+  assert.deepEqual(ordered,[[[0,0],[10,0]],[[11,0],[20,0]]]); // first path reversed to start near the origin
+});

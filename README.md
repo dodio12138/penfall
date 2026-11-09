@@ -90,6 +90,14 @@ python -m venv .venv
 - `web/glyphs/demo-variants.json` 是由内置字形**程序变形**得到的演示库（`node tools/make-demo-glyphs.cjs` 生成），仅用于体验变体切换，不是真实手写。
 - 工作区备份不含字库；字库请在面板中单独导出。
 
+## 图形与多色
+
+- **导入图形**：在文件树中导入 `.svg` 或 `.dxf`（CAD），会自动建成稿件（图形 + 空正文）；也可以在「书写设置 › 图形」里为已有稿件添加图形，实现图文混排。图形可以设置所在页、位置和宽度，有「原始尺寸」「适应版心」两个快捷按钮。
+- **SVG**：用浏览器自带的几何引擎采样（支持路径、贝塞尔曲线、圆弧、矩形、圆、椭圆、变换、mm / cm / in / px 单位），不会执行或加载文件里的脚本和外部资源。**DXF**：支持 ASCII 格式的 LINE、ARC、CIRCLE、LWPOLYLINE / POLYLINE（含凸度圆弧）、ELLIPSE、SPLINE、POINT，以及图层 / ACI 颜色和 `$INSUNITS` 单位。
+- **笔架**：在「书写设置 › 机器」中设置本工作区可用的笔（名称和颜色，最多 8 支）。图形中每种颜色自动对应到颜色最接近的笔（白色视为黑色）；正文用哪支笔可单独选。
+- **按笔生成**：G-code 页的「笔」选择只写某一支笔的内容，文件头注明 `; pen n`。写完一支笔会提示换下一支，所有笔写完再提示翻页。选「全部（不换笔）」时，会提示所有颜色都将用同一支笔书写。
+- 图形路径按就近顺序排列，减少抬笔空移。图形文件和放置位置都计入梳串：图形或位置变了，生成的 G-code 会自动更新。
+
 ## 生成与导入的边界
 
 - 内置示范级单线字库支持 A–Z（小写转大写）、数字及 `- . , : / ! ? + =`，不含中文。生成器遇到不支持的字符会阻止生成，**不会偷偷丢字或把系统字体冒充真实笔迹**。
@@ -167,6 +175,7 @@ web/js/common.js         公共工具：$、下载、文件名、行号、日志
 web/js/glyphs.js         字形库校验、内置字库、选字（亦供 Node 测试）
 web/js/glyph-manager.js  字库加载 / 导入（IndexedDB）、字形面板、纸张上逐字选写法
 web/js/path-engine.js    排版（预览与生成共用）、G-code 生成与解析（亦供 Node 测试）
+web/js/drawing.js        SVG / DXF → 毫米折线、颜色到笔的映射（DXF 部分亦供 Node 测试）
 web/js/workspace-store.js  v3 工作区存储与校验（亦供 Node 测试）
 web/js/dialogs.js        页面内弹窗
 web/js/editor.js         正文编辑、纸张预览、视图切换、任务状态
@@ -193,7 +202,7 @@ node --test tests/*.test.js
 
 单元测试包含字形生成、中文拒绝、边界、相对 / 英寸 / 圆弧解析、工作区读写、坏数据保护、配额失败、版本冲突、严格硬件指令验证、模拟控制器应答 / 错误、单读线程与状态交错、分片报告、单位换算、WCO / G92 / TLO 一致性、过期 / 复位失效、G54–G59 切换及 X/Y 设零读回、迟到应答隔离、任务基准变化 / 暂停故障锁释放、机器行程变换、HTTP 密钥与跨来源限制。
 
-浏览器回归脚本为 `tests/workspace.browser.cjs`，需要在测试环境安装 Playwright 并启动 Web 服务。执行 `node tests/workspace.browser.cjs`（笔起点回归：`node tests/origin.browser.cjs`；多页：`node tests/pages.browser.cjs`；字形回归：`node tests/glyphs.browser.cjs`；若 Playwright 浏览器版本不匹配，可设 `CHROME_PATH` 使用本机 Chrome）；可设置 `TEST_URL`、`CHROME_PATH`（使用本机 Chrome）和 `SCREENSHOT`。测试使用独立浏览器上下文，不触碰日常浏览器数据。覆盖文稿 / G-code / 参数隔离、改名复制删除、筛选、查找替换、刷新恢复、备份合并、TXT 原文下载、关闭重开、缩放复位、尺寸调整及跨标签页冲突恢复。
+浏览器回归脚本为 `tests/workspace.browser.cjs`，需要在测试环境安装 Playwright 并启动 Web 服务。执行 `node tests/workspace.browser.cjs`（笔起点回归：`node tests/origin.browser.cjs`；图形与多色：`node tests/drawing.browser.cjs`；多页：`node tests/pages.browser.cjs`；字形回归：`node tests/glyphs.browser.cjs`；若 Playwright 浏览器版本不匹配，可设 `CHROME_PATH` 使用本机 Chrome）；可设置 `TEST_URL`、`CHROME_PATH`（使用本机 Chrome）和 `SCREENSHOT`。测试使用独立浏览器上下文，不触碰日常浏览器数据。覆盖文稿 / G-code / 参数隔离、改名复制删除、筛选、查找替换、刷新恢复、备份合并、TXT 原文下载、关闭重开、缩放复位、尺寸调整及跨标签页冲突恢复。
 
 响应式和下拉回归为 `tests/ui.browser.cjs`，同样使用 Playwright。覆盖 320、360、390、600、768、844、1024、1280、1920、2560px 宽度，包括手机横屏、四个工作分页、九文稿长名称、无顶部横向滚动条、键盘操作、弹窗内下拉边界、触屏长选项、禁用状态同步及纸张自适应。设置 `SCREENSHOT_DIR` 可保存各尺寸截图。测试是浏览器视口 / 触屏模拟，不代表已经实测所有型号手机或浏览器。
 

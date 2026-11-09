@@ -9,7 +9,9 @@
   const MANIFEST = 'workspace.wtw';
   const TEXT_TYPES = ['.txt', '.md'];
   const CODE_TYPES = ['.gcode', '.nc', '.tap'];
-  const FILE_TYPES = [...TEXT_TYPES, ...CODE_TYPES, '.wtl', '.wtw'];
+  const DRAWING_TYPES = ['.svg', '.dxf'];
+  const FILE_TYPES = [...TEXT_TYPES, ...CODE_TYPES, ...DRAWING_TYPES, '.wtl', '.wtw'];
+  const DEFAULT_PENS = [{ name: '黑', color: '#1f2328' }, { name: '红', color: '#d0342c' }, { name: '蓝', color: '#2563eb' }];
   const VIEWS = ['editor', 'gcode', 'preview', 'path'];
   const PART = /^[^\u0000-\u001f\\/:*?"<>|]{1,120}$/;
 
@@ -50,8 +52,10 @@
   /** Everything except the text that changes the generated program. */
   function paramsHash(link) {
     const motion = { ...link.motion };
-    return hash(JSON.stringify([Object.entries(link.settings).sort(), Object.entries(motion).sort(), link.glyphs]));
+    return hash(JSON.stringify([Object.entries(link.settings).sort(), Object.entries(motion).sort(), link.glyphs, ...(link.drawing ? [link.drawing] : [])]));
   }
+  /** Inputs of the generator besides parameters: the text, plus the drawing file when there is one. */
+  const inputHash = (text, drawing) => drawing ? hash(`${text}\u0000${drawing}`) : hash(text);
 
   function normalizeLink(raw, linkPath) {
     const value = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
@@ -59,6 +63,8 @@
     const name = stem(linkPath || 'untitled.wtl');
     const sibling = (key, fallback, types) => (typeof value[key] === 'string' && validPart(value[key]) && types.includes(extname(value[key])) ? value[key] : fallback);
     const sync = value.sync && typeof value.sync === 'object' ? value.sync : {};
+    const drawing = value.drawing && typeof value.drawing === 'object' ? value.drawing : null;
+    const number = (item, min, max) => Number.isFinite(item) && item >= min && item <= max ? item : null;
     return {
       format: LINK_FORMAT, version: 1,
       text: sibling('text', `${name}.txt`, TEXT_TYPES),
@@ -67,6 +73,10 @@
       motion: strings(value.motion),
       glyphs: Glyphs.normalizeSelection(value.glyphs),
       view: VIEWS.includes(value.view) ? value.view : 'editor',
+      // Optional drawing (SVG / DXF in the same folder) placed on a page: x / y = top-left on paper, width in mm.
+      drawing: drawing && typeof drawing.file === 'string' && validPart(drawing.file) && DRAWING_TYPES.includes(extname(drawing.file))
+        ? { file: drawing.file, page: Number.isInteger(drawing.page) && drawing.page >= 1 && drawing.page <= 99 ? drawing.page : 1, x: number(drawing.x, -1000, 2000), y: number(drawing.y, -1000, 2000), width: number(drawing.width, .1, 4000) }
+        : null,
       sync: {
         source: ['generated', 'manual'].includes(sync.source) ? sync.source : '',
         textHash: typeof sync.textHash === 'string' ? sync.textHash : '',
@@ -78,8 +88,8 @@
   }
   const serializeLink = (link) => JSON.stringify(link, null, 2) + '\n';
   /** Record that text, parameters and program currently belong together. */
-  function markSynced(link, text, gcode, source) {
-    link.sync = { source, textHash: hash(text), paramsHash: paramsHash(link), gcodeHash: hash(gcode), at: new Date().toISOString() };
+  function markSynced(link, text, gcode, source, drawing = '') {
+    link.sync = { source, textHash: inputHash(text, drawing), paramsHash: paramsHash(link), gcodeHash: hash(gcode), at: new Date().toISOString() };
     return link;
   }
   /**
@@ -91,12 +101,12 @@
    *  - 'empty'      no program yet → generate from the text
    *  - 'new'        a program exists but was never synced (e.g. copied in) → treated as manual
    */
-  function analyzeSync(link, text, gcode) {
+  function analyzeSync(link, text, gcode, drawing = '') {
     const sync = link.sync;
     if (!gcode.trim()) return { state: 'empty', source: sync.source };
     if (!sync.gcodeHash) return { state: 'new', source: sync.source || 'manual' };
     if (hash(gcode) !== sync.gcodeHash) return { state: 'external', source: 'manual' };
-    const inputsChanged = hash(text) !== sync.textHash || paramsHash(link) !== sync.paramsHash;
+    const inputsChanged = inputHash(text, drawing) !== sync.textHash || paramsHash(link) !== sync.paramsHash;
     if (!inputsChanged) return { state: 'synced', source: sync.source };
     return { state: sync.source === 'generated' ? 'regenerate' : 'stale', source: sync.source };
   }
@@ -106,7 +116,8 @@
     if (value.format !== undefined && value.format !== WORKSPACE_FORMAT) throw Error('不是工作区清单（format 应为 web-typewriter/workspace）');
     const machine = value.machine && typeof value.machine === 'object' ? value.machine : {};
     const penWidth = Number.isFinite(machine.penWidth) && machine.penWidth >= .05 && machine.penWidth <= 5 ? machine.penWidth : .5;
-    return { format: WORKSPACE_FORMAT, version: 1, machine: { penWidth } };
+    const pens = (Array.isArray(machine.pens) ? machine.pens : DEFAULT_PENS).filter((pen) => pen && typeof pen.name === 'string' && /^#[0-9a-f]{6}$/i.test(pen.color || '')).slice(0, 8).map((pen) => ({ name: pen.name.trim().slice(0, 12) || '笔', color: pen.color.toLowerCase() }));
+    return { format: WORKSPACE_FORMAT, version: 1, machine: { penWidth, pens: pens.length ? pens : DEFAULT_PENS.map((pen) => ({ ...pen })) } };
   }
 
   /**
@@ -132,9 +143,10 @@
       const base = join(dirname(entry.path), stem(entry.path));
       const text = TEXT_TYPES.map((ext) => base + ext).find((path) => byPath.has(path)) || null;
       const gcode = CODE_TYPES.map((ext) => base + ext).find((path) => byPath.has(path)) || null;
-      const children = [text, gcode].filter(Boolean).map((path) => ({ type: 'file', path, name: basename(path) }));
+      const drawing = DRAWING_TYPES.map((ext) => base + ext).find((path) => byPath.has(path)) || null;
+      const children = [text, gcode, drawing].filter(Boolean).map((path) => ({ type: 'file', path, name: basename(path) }));
       children.forEach((child) => nested.add(child.path));
-      folder(dirname(entry.path)).children.push({ type: 'link', path: entry.path, name: stem(entry.path), text, gcode, children });
+      folder(dirname(entry.path)).children.push({ type: 'link', path: entry.path, name: stem(entry.path), text, gcode, drawing, children });
     }
     for (const entry of files) {
       if (extname(entry.path) === '.wtl' || nested.has(entry.path)) continue;
@@ -153,7 +165,7 @@
     const ext = extname(path);
     if (ext === '.wtl') return { kind: 'link', key: path, view: null };
     const link = join(dirname(path), stem(path)) + '.wtl';
-    if ((TEXT_TYPES.includes(ext) || CODE_TYPES.includes(ext)) && existing.has(link)) return { kind: 'link', key: link, view: CODE_TYPES.includes(ext) ? 'gcode' : 'editor' };
+    if ((TEXT_TYPES.includes(ext) || CODE_TYPES.includes(ext) || DRAWING_TYPES.includes(ext)) && existing.has(link)) return { kind: 'link', key: link, view: CODE_TYPES.includes(ext) ? 'gcode' : DRAWING_TYPES.includes(ext) ? 'preview' : 'editor' };
     if (TEXT_TYPES.includes(ext)) return { kind: 'text', key: path, view: 'editor' };
     if (CODE_TYPES.includes(ext)) return { kind: 'gcode', key: path, view: 'gcode' };
     return null;
@@ -167,7 +179,7 @@
     return { format: ARCHIVE_FORMAT, version: 1, name: typeof raw.name === 'string' ? raw.name.slice(0, 120) : '', dirs, files };
   }
 
-  const api = { LINK_FORMAT, WORKSPACE_FORMAT, ARCHIVE_FORMAT, MANIFEST, TEXT_TYPES, CODE_TYPES, FILE_TYPES, dirname, basename, extname, stem, join, validPart, validPath, nameError, uniqueStem, hash, paramsHash, normalizeLink, serializeLink, markSynced, analyzeSync, normalizeManifest, buildTree, documentFor, normalizeArchive };
+  const api = { inputHash, LINK_FORMAT, WORKSPACE_FORMAT, ARCHIVE_FORMAT, MANIFEST, TEXT_TYPES, CODE_TYPES, DRAWING_TYPES, DEFAULT_PENS, FILE_TYPES, dirname, basename, extname, stem, join, validPart, validPath, nameError, uniqueStem, hash, paramsHash, normalizeLink, serializeLink, markSynced, analyzeSync, normalizeManifest, buildTree, documentFor, normalizeArchive };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Links = api;
 })(typeof window !== 'undefined' ? window : globalThis);

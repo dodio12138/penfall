@@ -39,6 +39,27 @@
     return { placements, missing: [...missing], overflow, pages: page };
   }
 
+  /** Greedy nearest-neighbour order (paths may be reversed) to cut pen-up travel between drawing strokes. */
+  function orderPaths(paths) {
+    const left = paths.filter((points) => points.length);
+    const ordered = [];
+    let at = [0, 0];
+    while (left.length) {
+      let best = 0, reverse = false, distance = Infinity;
+      for (let i = 0; i < left.length; i++) {
+        const start = left[i][0], end = left[i].at(-1);
+        const ds = (start[0] - at[0]) ** 2 + (start[1] - at[1]) ** 2, de = (end[0] - at[0]) ** 2 + (end[1] - at[1]) ** 2;
+        if (ds < distance) { distance = ds; best = i; reverse = false; }
+        if (de < distance) { distance = de; best = i; reverse = true; }
+      }
+      const [next] = left.splice(best, 1);
+      const points = reverse ? [...next].reverse() : next;
+      ordered.push(points);
+      at = points.at(-1);
+    }
+    return ordered;
+  }
+
   function generate(text, options) {
     const { width, height, margin, size, gap, lineGap, feed, penUp, penDown } = options;
     // Pen zero (work 0,0) in paper mm from the left / bottom edge, and machine axis directions.
@@ -46,17 +67,28 @@
     if (![origin.x, origin.y].every(Number.isFinite) || ![1, -1].includes(origin.dirX) || ![1, -1].includes(origin.dirY)) throw Error('笔起点或坐标方向无效。');
     if (![width,height,margin,size,gap,lineGap,feed,penUp,penDown].every(Number.isFinite) || width<=0 || height<=0 || size<=0 || feed<=0 || margin<0 || gap<0 || lineGap<0 || margin*2+size>Math.min(width,height) || penUp<=penDown) throw Error('纸张、速度或抬落笔参数无效（抬笔 Z 必须大于落笔 Z）。');
     const result = layoutText(text, options, options.resolve || defaultResolver());
+    // Drawing paths (paper mm, top-down) already placed on pages and assigned to pens.
+    const drawings = Array.isArray(options.paths) ? options.paths : [];
+    const pages = Math.max(result.pages, ...drawings.map((item) => item.page));
+    const pen = options.pen === undefined || options.pen === 'all' ? null : Number(options.pen);
+    const textPen = options.textPen || 1;
     if (result.missing.length) throw Error(`字库暂不支持：${result.missing.slice(0,20).join(' ')}${result.missing.length > 20 ? ` 等 ${result.missing.length} 个字` : ''}。请在「字形」面板启用含这些字的字库，或导入外部生成的 G-code；不能用系统字体冒充笔迹。`);
-    if (!text.trim()) throw Error('请先输入书写内容。');
+    if (!text.trim() && !drawings.length) throw Error('请先输入书写内容或添加图形。');
     if (result.overflow) throw Error(`内容超过 ${MAX_PAGES} 页上限，请拆分文稿。`);
     const page = options.page === undefined ? 1 : options.page;
-    if (!Number.isInteger(page) || page < 1 || page > result.pages) throw Error(`页码无效：共 ${result.pages} 页。`);
+    if (!Number.isInteger(page) || page < 1 || page > pages) throw Error(`页码无效：共 ${pages} 页。`);
     const n = value => Number(value.toFixed(3));
     const lines = ['; Single-line text / Z-axis pen profile - review before use',
       `; Pen zero at ${n(origin.x)} mm from paper left, ${n(origin.y)} mm from paper bottom; +X ${origin.dirX > 0 ? 'right' : 'left'}, +Y ${origin.dirY > 0 ? 'up' : 'down'}`,
-      `; Page ${page} of ${result.pages}`,
+      `; Page ${page} of ${pages}${pen === null ? '' : `; pen ${pen}`}`,
       'G21', 'G90', 'G17', `G0 Z${n(penUp)}`, `G1 F${n(feed)}`];
-    for (const { x, y, glyph } of result.placements.filter((item) => item.page === page)) {
+    const toWork = (px, py) => `X${n(origin.dirX*(px-origin.x))} Y${n(origin.dirY*(height-py-origin.y))}`;
+    const stroke = (points) => {
+      lines.push(`G0 ${toWork(...points[0])}`, `G1 Z${n(penDown)} F${n(Math.min(feed,300))}`);
+      for (const p of points.slice(1)) lines.push(`G1 ${toWork(...p)} F${n(feed)}`);
+      lines.push(`G0 Z${n(penUp)}`);
+    };
+    for (const { x, y, glyph } of result.placements.filter((item) => item.page === page && (pen === null || pen === textPen))) {
       const scale = size / glyph.unitsPerEm;
       const point = p => `X${n(origin.dirX*(x+p[0]*scale-origin.x))} Y${n(origin.dirY*(height-y-p[1]*scale-origin.y))}`;
       for (const stroke of glyph.strokes) {
@@ -65,6 +97,7 @@
         lines.push(`G0 Z${n(penUp)}`);
       }
     }
+    for (const points of orderPaths(drawings.filter((item) => item.page === page && (pen === null || item.pen === pen)).map((item) => item.points))) stroke(points);
     lines.push('; End - pen remains raised, no automatic homing');
     return lines.join('\n');
   }
@@ -133,7 +166,7 @@
     });
     return {segments,errors,commands,bounds,length};
   }
-  const api={generate,parse,layoutText,MAX_PAGES};
+  const api={generate,parse,layoutText,orderPaths,MAX_PAGES};
   if(typeof module!=='undefined'&&module.exports) module.exports=api;
   else root.PathEngine=api;
 })(typeof window!=='undefined'?window:globalThis);

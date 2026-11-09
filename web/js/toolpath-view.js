@@ -136,6 +136,9 @@ function drawToolpath() {
     ctx.strokeStyle = color(drawing ? '--path-draw' : '--path-travel');
     ctx.lineWidth = drawing ? inkWidth || 1.4 : .8;
     if (drawing && inkWidth) ctx.strokeStyle = '#c7d3e3d9';
+    // A single-pen program is drawn in that pen's colour (dark pens keep the default for contrast on the dark canvas).
+    const pen = $('#pen').value;
+    if (drawing && pen !== 'all') { const [r, g, b] = [1, 3, 5].map((i) => parseInt(penColor(Number(pen)).slice(i, i + 2), 16)); if (r * .299 + g * .587 + b * .114 > 70) ctx.strokeStyle = penColor(Number(pen)); }
     ctx.setLineDash(drawing ? [] : [4, 4]);
     ctx.beginPath();
     for (const segment of toolpath.segments) {

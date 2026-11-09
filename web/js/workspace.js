@@ -6,7 +6,7 @@
   const CURRENT_KEY = 'web-typewriter:workspace:current';
   const MIGRATED_KEY = 'web-typewriter:migrated-to-files';
   const SAVE_DELAY = 300;
-  const motionDefaults = { feed: '1200', 'pen-up': '5', 'pen-down': '0', page: '1', 'page-set': 'all', ...ORIGIN_DEFAULTS };
+  const motionDefaults = { feed: '1200', 'pen-up': '5', 'pen-down': '0', page: '1', 'page-set': 'all', 'text-pen': '1', pen: 'all', ...ORIGIN_DEFAULTS };
   const TYPE_LABEL = { '.txt': 'TXT', '.md': 'MD', '.gcode': 'GC', '.nc': 'NC', '.tap': 'TAP', '.wtw': 'WS', '.wtl': '稿' };
 
   let fsys = null;
@@ -127,6 +127,11 @@
       doc.saved.link = file.content; doc.mtimes.link = file.mtime;
       const folder = Links.dirname(key);
       doc.paths = { text: Links.join(folder, doc.link.text), gcode: Links.join(folder, doc.link.gcode), link: key };
+      if (doc.link.drawing) {
+        doc.drawingPath = Links.join(folder, doc.link.drawing.file);
+        doc.drawingText = (await readOptional(doc.drawingPath))?.content ?? null;
+        if (doc.drawingText === null) log(`稿件「${Links.stem(key)}」引用的图形 ${doc.link.drawing.file} 不存在。`);
+      }
     } else doc.paths = kind === 'text' ? { text: key } : { gcode: key };
     for (const part of ['text', 'gcode']) {
       if (!doc.paths[part]) continue;
@@ -139,7 +144,7 @@
     doc.view = kind === 'gcode' ? 'gcode' : viewMemory[key] || doc.link?.view || 'editor';
     // 梳串 on open: compare with the hashes recorded when text and program were last consistent.
     if (doc.link) {
-      const sync = Links.analyzeSync(doc.link, doc.text, doc.gcode);
+      const sync = Links.analyzeSync(doc.link, doc.text, doc.gcode, doc.drawingText || '');
       doc.syncState = sync.state;
       doc.programSource = sync.state === 'new' ? 'manual' : sync.source;
       doc.programDirty = sync.state === 'stale' || sync.state === 'regenerate';
@@ -162,6 +167,7 @@
     programDirty = doc?.programDirty || false;
     programSource = doc?.programSource || '';
     setGlyphSelection(link?.glyphs, content.value);
+    applyDrawing(doc);
     content.scrollTop = 0; codeEditor.scrollTop = 0;
     const gcodeOnly = doc?.kind === 'gcode';
     for (const id of ['edit-tab', 'preview-tab']) $(`#${id}`).disabled = gcodeOnly;
@@ -186,15 +192,18 @@
     if (doc.link) {
       // The current view is per-device UI state (kept in localStorage), not file content: no writes / conflicts on tab switches.
       Object.assign(doc.link, { settings: config(), motion: motionSnapshot(), glyphs: glyphSelection });
-      const sync = doc.link.sync;
+      const placement = drawingPlacement();
+      if (doc.link.drawing && placement) doc.link.drawing = { file: doc.link.drawing.file, ...placement };
+      const sync = doc.link.sync, drawing = doc.drawingText || '';
       // Record consistency only when text, parameters and program truly belong together.
-      if (!programDirty && (sync.textHash !== Links.hash(doc.text) || sync.gcodeHash !== Links.hash(doc.gcode) || sync.paramsHash !== Links.paramsHash(doc.link) || sync.source !== programSource)) Links.markSynced(doc.link, doc.text, doc.gcode, programSource);
+      if (!programDirty && (sync.textHash !== Links.inputHash(doc.text, drawing) || sync.gcodeHash !== Links.hash(doc.gcode) || sync.paramsHash !== Links.paramsHash(doc.link) || sync.source !== programSource)) Links.markSynced(doc.link, doc.text, doc.gcode, programSource, drawing);
     }
     scheduleSave();
     return !conflict;
   }
   async function openPath(path, view) {
     if (path === Links.MANIFEST) { showPanel('settings'); $('#pen-width').focus(); return; } // machine settings of this workspace
+    if (Links.DRAWING_TYPES.includes(Links.extname(path)) && !known.has(Links.join(Links.dirname(path), `${Links.stem(path)}.wtl`))) return wrapDrawing(path);
     const target = Links.documentFor(path, known);
     if (!target) { log(`${Links.basename(path)} 不是可在编辑器中打开的文件。`); return; }
     if (hardwareJob || controllerBusy()) { log('控制器正在操作，暂不能切换文稿。'); return; }
@@ -234,7 +243,7 @@
     if (!await flushAll() || conflict) return false;
     // Files changed on disk / in another tab since loading? Reload them first (nothing unsaved here now).
     const fresh = await loadDoc(doc.key, doc.kind).catch(() => null);
-    if (fresh && docParts(doc).some((part) => fresh.saved[part] !== doc.saved[part])) {
+    if (fresh && (docParts(doc).some((part) => fresh.saved[part] !== doc.saved[part]) || fresh.drawingText !== doc.drawingText)) {
       fresh.view = currentView;
       docs.set(doc.key, fresh);
       applyDocument();
@@ -242,8 +251,8 @@
     }
     const current = active();
     if (current.kind === 'gcode') return true;
-    const state = current.link ? Links.analyzeSync(current.link, current.text, current.gcode).state : current.gcode.trim() ? 'new' : 'empty';
-    const regenerate = content.value.trim() && (state === 'empty' || (programSource === 'generated' && (programDirty || state === 'regenerate')));
+    const state = current.link ? Links.analyzeSync(current.link, current.text, current.gcode, current.drawingText || '').state : current.gcode.trim() ? 'new' : 'empty';
+    const regenerate = (content.value.trim() || layout.paths?.length) && (state === 'empty' || (programSource === 'generated' && (programDirty || state === 'regenerate')));
     if (regenerate) {
       try {
         setProgram(buildProgram(), null, 'generated', { keepCamera: true });
@@ -259,7 +268,7 @@
   function refreshLocks() {
     const doc = active(), noDoc = !doc, locked = isLocked() || noDoc;
     const gcodeOnly = doc?.kind === 'gcode';
-    for (const id of ['content', 'title', 'gcode', 'generate', 'generate-code', 'import-gcode', 'load-demo', 'export', 'save-document', ...settings, ...motionInputs]) $(`#${id}`).disabled = locked;
+    for (const id of ['content', 'title', 'gcode', 'generate', 'generate-code', 'import-gcode', 'load-demo', 'export', 'save-document', 'drawing-page', 'drawing-x', 'drawing-y', 'drawing-width', 'drawing-natural', 'drawing-fit', 'drawing-remove', 'drawing-add', ...settings, ...motionInputs]) $(`#${id}`).disabled = locked;
     if (gcodeOnly) for (const id of ['content', 'generate', 'generate-code', 'export']) $(`#${id}`).disabled = true;
     const treeLocked = isLocked() || !fsys;
     for (const id of ['new-document', 'new-folder', 'import-document', 'rename-document', 'duplicate-document', 'delete-document', 'welcome-new', 'welcome-import', 'refresh-tree']) $(`#${id}`).disabled = treeLocked || (['rename-document', 'duplicate-document', 'delete-document'].includes(id) && !selectedPath);
@@ -513,7 +522,7 @@
   // ---------- file operations ----------
   /** All files a node stands for: a draft moves / renames / deletes together. */
   function members(node) {
-    if (node.type === 'link') return [node.path, node.text, node.gcode].filter(Boolean);
+    if (node.type === 'link') return [node.path, node.text, node.gcode, node.drawing].filter(Boolean);
     return [node.path];
   }
   async function guarded(work) {
@@ -567,6 +576,7 @@
       const link = Links.normalizeLink(JSON.parse(file.content), linkPath);
       link.text = node.text ? `${newName}${Links.extname(node.text)}` : `${newName}.txt`;
       link.gcode = node.gcode ? `${newName}${Links.extname(node.gcode)}` : `${newName}.gcode`;
+      if (link.drawing && node.drawing && Links.basename(node.drawing) === link.drawing.file) link.drawing.file = `${newName}${Links.extname(node.drawing)}`;
       await fsys.write(linkPath, Links.serializeLink(link), file.mtime);
     }
     const remap = (path) => { for (const [from, to] of renames) { if (path === from) return to; if (path.startsWith(`${from}/`)) return to + path.slice(from.length); } return path; };
@@ -602,10 +612,11 @@
     await guarded(async () => {
       const folder = Links.dirname(node.path);
       if (node.type === 'link') {
-        const stem = Links.uniqueStem(known, folder, `${node.name} 副本`, ['.wtl', '.txt', '.md', '.gcode', '.nc', '.tap']);
-        for (const path of [node.text, node.gcode].filter(Boolean)) await fsys.write(Links.join(folder, stem + Links.extname(path)), (await fsys.read(path)).content, null);
+        const stem = Links.uniqueStem(known, folder, `${node.name} 副本`, ['.wtl', '.txt', '.md', '.gcode', '.nc', '.tap', '.svg', '.dxf']);
+        for (const path of [node.text, node.gcode, node.drawing].filter(Boolean)) await fsys.write(Links.join(folder, stem + Links.extname(path)), (await fsys.read(path)).content, null);
         const link = Links.normalizeLink(JSON.parse((await fsys.read(node.path)).content), Links.join(folder, `${stem}.wtl`));
         link.text = `${stem}${Links.extname(node.text || '.txt')}`; link.gcode = `${stem}${Links.extname(node.gcode || '.gcode')}`;
+        if (link.drawing && node.drawing) link.drawing.file = `${stem}${Links.extname(node.drawing)}`;
         await fsys.write(Links.join(folder, `${stem}.wtl`), Links.serializeLink(link), null);
         selectedPath = Links.join(folder, `${stem}.wtl`);
       } else {
@@ -659,12 +670,21 @@
           const link = Links.normalizeLink({ text: `${stem}${ext}`, settings: { ...defaults }, motion: { ...motionDefaults } }, Links.join(folder, `${stem}.wtl`));
           await fsys.write(Links.join(folder, `${stem}.wtl`), Links.serializeLink(link), null);
           first ||= Links.join(folder, `${stem}.wtl`);
+        } else if (Links.DRAWING_TYPES.includes(ext)) {
+          parseDrawingFile(file.name, text); // reject unusable files before writing anything
+          const stem = Links.uniqueStem(known, folder, Links.stem(file.name), ['.wtl', '.txt', ext]);
+          await fsys.write(Links.join(folder, `${stem}${ext}`), text, null);
+          await fsys.write(Links.join(folder, `${stem}.txt`), '', null);
+          const link = Links.normalizeLink({ settings: { ...defaults }, motion: { ...motionDefaults }, drawing: { file: `${stem}${ext}` } }, Links.join(folder, `${stem}.wtl`));
+          await fsys.write(Links.join(folder, `${stem}.wtl`), Links.serializeLink(link), null);
+          first ||= Links.join(folder, `${stem}.wtl`);
+          if (!files.some((item) => Links.TEXT_TYPES.includes(Links.extname(item.name)))) first = Links.join(folder, `${stem}.wtl`);
         } else if (Links.CODE_TYPES.includes(ext)) {
           if (text.length > 500000) throw Error(`${file.name} 超过 500 KB 预览上限`);
           const stem = Links.uniqueStem(known, folder, Links.stem(file.name), [ext, '.wtl']);
           await fsys.write(Links.join(folder, `${stem}${ext}`), text, null);
           first ||= Links.join(folder, `${stem}${ext}`);
-        } else throw Error(`${file.name}：只支持 .txt .md .gcode .nc .tap 或工作区备份 .json`);
+        } else throw Error(`${file.name}：只支持 .txt .md .gcode .nc .tap .svg .dxf 或工作区备份 .json`);
         known.add(first); count++;
         await refreshTree();
       }
@@ -721,6 +741,8 @@
     try { manifest = Links.normalizeManifest(file ? JSON.parse(file.content) : {}); } catch { manifest = Links.normalizeManifest(); log('workspace.wtw 无效，使用默认机器设置。'); }
     manifestMtime = file?.mtime ?? null;
     $('#pen-width').value = String(manifest.machine.penWidth);
+    renderPenOptions();
+    renderPenRack();
   }
   function saveManifest() {
     clearTimeout(manifestTimer);
@@ -739,6 +761,127 @@
     saveManifest();
     renderPreview();
     drawToolpath();
+  });
+
+  // ---------- pen rack (workspace machine setting) ----------
+  function penRackChanged() {
+    saveManifest();
+    renderPenOptions();
+    layout = makeLayout(); renderPreview(); drawToolpath();
+    markStale(); scheduleRegenerate(); updateTask();
+  }
+  function renderPenRack() {
+    const list = $('#pen-list');
+    list.replaceChildren(...manifest.machine.pens.map((pen, index) => {
+      const row = element('div', 'pen-row');
+      const number = element('span', 'pen-number', String(index + 1));
+      const name = element('input');
+      name.value = pen.name; name.maxLength = 12; name.setAttribute('aria-label', `笔 ${index + 1} 名称`);
+      name.addEventListener('change', () => { manifest.machine.pens[index].name = name.value.trim() || `笔${index + 1}`; penRackChanged(); });
+      const color = element('input');
+      color.type = 'color'; color.value = pen.color; color.setAttribute('aria-label', `笔 ${index + 1} 颜色`);
+      color.addEventListener('change', () => { manifest.machine.pens[index].color = color.value; penRackChanged(); });
+      const remove = element('button', '', '×');
+      remove.type = 'button'; remove.disabled = manifest.machine.pens.length <= 1 || isLocked();
+      remove.setAttribute('aria-label', `移除笔 ${index + 1}`);
+      remove.addEventListener('click', () => { manifest.machine.pens.splice(index, 1); renderPenRack(); penRackChanged(); });
+      row.append(number, name, color, remove);
+      return row;
+    }));
+    $('#add-pen').disabled = manifest.machine.pens.length >= 8 || isLocked();
+  }
+  $('#add-pen').addEventListener('click', () => {
+    if (manifest.machine.pens.length >= 8) return;
+    const palette = ['#16a34a', '#9333ea', '#ea580c', '#0891b2', '#db2777'];
+    manifest.machine.pens.push({ name: `笔${manifest.machine.pens.length + 1}`, color: palette[manifest.machine.pens.length % palette.length] });
+    renderPenRack(); penRackChanged();
+  });
+
+  // ---------- drawings (SVG / DXF attached to a draft) ----------
+  function parseDrawingFile(name, text) {
+    const ext = Links.extname(name);
+    return ext === '.dxf' ? Drawing.parseDxf(text) : Drawing.parseSvg(text);
+  }
+  function applyDrawing(doc) {
+    const drawing = doc?.link?.drawing;
+    setDrawing(drawing && doc.drawingText !== null ? drawing.file : null, doc?.drawingText || '');
+    let placement = drawing && drawingState?.model ? drawing : null;
+    if (placement && ![placement.x, placement.y, placement.width].every(Number.isFinite)) {
+      const c = config();
+      let [width, height] = PAPER_SIZES[c.paper];
+      if (c.orientation === 'landscape') [width, height] = [height, width];
+      placement = { ...Drawing.defaultPlacement(drawingState.model, { width, height, margin: Number(c.margin) }), page: drawing.page || 1 };
+    }
+    setDrawingInputs(placement);
+    $('#drawing-fields').hidden = !drawing;
+    $('#drawing-add').hidden = Boolean(drawing) || doc?.kind !== 'link';
+    if (!drawing) return;
+    $('#drawing-name').textContent = drawing.file;
+    $('#drawing-size').textContent = drawingState?.model ? `原始 ${drawingState.model.width.toFixed(1)} × ${drawingState.model.height.toFixed(1)} mm` : drawingState?.error || '文件缺失';
+    const pens = penList();
+    $('#drawing-legend').replaceChildren(...(drawingState?.model?.colors || []).map((color) => {
+      const pen = Drawing.nearestPen(color, pens) + 1;
+      const chip = element('span', 'pen-chip', `${color} → ${pen} · ${pens[pen - 1].name}`);
+      chip.style.setProperty('--pen', color);
+      return chip;
+    }));
+  }
+  /** A drawing file without a draft: create x.txt + x.wtl around it, then open. */
+  async function wrapDrawing(path) {
+    await guarded(async () => {
+      const folder = Links.dirname(path), stem = Links.stem(path);
+      parseDrawingFile(path, (await fsys.read(path)).content);
+      if (!known.has(Links.join(folder, `${stem}.txt`))) await fsys.write(Links.join(folder, `${stem}.txt`), '', null);
+      const link = Links.normalizeLink({ settings: { ...defaults }, motion: { ...motionDefaults }, drawing: { file: Links.basename(path) } }, Links.join(folder, `${stem}.wtl`));
+      await fsys.write(Links.join(folder, `${stem}.wtl`), Links.serializeLink(link), null);
+      await refreshTree();
+      await openPath(Links.join(folder, `${stem}.wtl`), 'preview');
+    });
+  }
+  $('#drawing-add').addEventListener('click', () => $('#drawing-file').click());
+  $('#drawing-file').addEventListener('change', async (event) => {
+    const file = event.target.files[0];
+    event.target.value = '';
+    const doc = active();
+    if (!file || !doc?.link || isLocked()) return;
+    await guarded(async () => {
+      const text = await file.text(), ext = Links.extname(file.name);
+      if (!Links.DRAWING_TYPES.includes(ext)) throw Error('只支持 .svg 或 .dxf');
+      parseDrawingFile(file.name, text);
+      const folder = Links.dirname(doc.key);
+      const stem = Links.uniqueStem(known, folder, Links.stem(doc.key), [ext]);
+      await fsys.write(Links.join(folder, `${stem}${ext}`), text, null);
+      doc.link.drawing = { file: `${stem}${ext}`, page: currentPage(), x: null, y: null, width: null };
+      doc.drawingPath = Links.join(folder, `${stem}${ext}`);
+      doc.drawingText = text;
+      applyDrawing(doc);
+      layout = makeLayout(); renderPreview(); markStale(); scheduleRegenerate(); updateTask();
+      capture();
+      log(`已为稿件添加图形 ${stem}${ext}。可在「书写设置 › 图形」调整位置与大小。`);
+    });
+  });
+  $('#drawing-remove').addEventListener('click', async () => {
+    const doc = active();
+    if (!doc?.link?.drawing || isLocked()) return;
+    if (!await AppDialogs.confirm({ title: '移除图形', message: `从稿件中移除并删除 ${doc.link.drawing.file}？`, confirmLabel: '移除', danger: true })) return;
+    await guarded(async () => {
+      const path = doc.drawingPath;
+      doc.link.drawing = null; doc.drawingText = null; doc.drawingPath = null;
+      applyDrawing(doc);
+      layout = makeLayout(); renderPreview(); markStale(); scheduleRegenerate(); updateTask();
+      capture();
+      await flushAll();
+      if (path && known.has(path)) await fsys.remove(path);
+    });
+  });
+  for (const [id, fit] of [['drawing-natural', false], ['drawing-fit', true]]) $(`#${id}`).addEventListener('click', () => {
+    const model = drawingState?.model;
+    if (!model) return;
+    const area = layout.width - layout.margin * 2, areaHeight = layout.height - layout.margin * 2;
+    const width = fit ? Math.min(area, model.width * areaHeight / model.height) : model.width;
+    $('#drawing-width').value = String(Math.round(width * 10) / 10);
+    if (fit) { $('#drawing-x').value = String(layout.margin); $('#drawing-y').value = String(layout.margin); }
+    $('#drawing-width').dispatchEvent(new Event('input', { bubbles: true }));
   });
 
   // ---------- workspaces ----------
@@ -904,6 +1047,7 @@
     get activeName() { const doc = active(); return doc ? (doc.kind === 'link' ? `${Links.stem(doc.key)}.txt` : Links.basename(doc.key)) : ''; },
     get blocked() { return Boolean(conflict); },
     get penWidth() { return manifest.machine.penWidth; },
+    get pens() { return manifest.machine.pens; },
     get name() { return fsys?.label || ''; },
   };
   $$('[data-panel]').forEach((button) => button.addEventListener('click', () => showPanel(button.dataset.panel)));

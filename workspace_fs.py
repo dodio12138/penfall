@@ -9,7 +9,7 @@ import shutil
 import threading
 from pathlib import Path
 
-FILE_TYPES = {'.txt', '.md', '.gcode', '.nc', '.tap', '.wtl', '.wtw'}
+FILE_TYPES = {'.txt', '.md', '.gcode', '.nc', '.tap', '.wtl', '.wtw', '.svg', '.dxf'}
 MAX_CONTENT = 1_500_000
 MAX_DEPTH = 8
 MAX_ENTRIES = 5000
@@ -73,7 +73,7 @@ class WorkspaceRoot:
         for part in parts:
             _check_part(part)
         if kind == 'file' and Path(parts[-1]).suffix.lower() not in FILE_TYPES:
-            raise FsError('只支持 .txt .md .gcode .nc .tap .wtl .wtw 文件')
+            raise FsError('只支持 .txt .md .gcode .nc .tap .svg .dxf .wtl .wtw 文件')
         target = base.joinpath(*parts)
         resolved = target.resolve()
         if resolved != base and base not in resolved.parents:

@@ -18,10 +18,11 @@
 ## `workspace.wtw`
 
 ```json
-{ "format": "web-typewriter/workspace", "version": 1, "machine": { "penWidth": 0.5 } }
+{ "format": "web-typewriter/workspace", "version": 1, "machine": { "penWidth": 0.5, "pens": [{ "name": "黑", "color": "#1f2328" }, { "name": "红", "color": "#d0342c" }] } }
 ```
 
-`machine.penWidth`：笔在纸上画出的线宽（mm，0.05–5），用于纸张预览，以及刀轨页「按笔宽显示」。
+- `machine.penWidth`：笔在纸上画出的线宽（mm，0.05–5），用于纸张预览，以及刀轨页「按笔宽显示」。
+- `machine.pens`：笔架，1–8 支，按顺序编号为笔 1、笔 2……；图形颜色自动对应到颜色最接近的笔。
 
 ## `名称.wtl`（稿件链接）
 
@@ -35,12 +36,15 @@
   "motion": { "feed": "1200", "pen-up": "5", "pen-down": "0", "page": "1", "origin-corner": "top-left", "origin-x": "10", "origin-y": "8", "x-dir": "1", "y-dir": "-1" },
   "glyphs": { "libraries": ["builtin-latin"], "strategy": "first", "seed": 1, "prefer": {}, "pins": [] },
   "view": "editor",
+  "drawing": { "file": "给妈妈.svg", "page": 1, "x": 20, "y": 20, "width": 120 },
   "sync": { "source": "generated", "textHash": "…", "paramsHash": "…", "gcodeHash": "…", "at": "2026-11-09T03:00:00.000Z" }
 }
 ```
 
 - `text` / `gcode`：同一文件夹中的文件名（不能含路径）。重命名或移动稿件时三个文件一起改。
 - `settings` / `motion` / `glyphs`：生成 G-code 用到的全部参数（排版、笔轴、笔起点、页码、选字，见 [glyph-format.md](glyph-format.md)）。
+- `drawing`（可选）：同一文件夹中的 `.svg` / `.dxf`，以及它在纸上的位置（`x` / `y` 为左上角距纸边 mm，`width` 为宽度 mm，`page` 为所在页）。图形文件的内容也计入梳串。
+- `motion.text-pen` / `motion.pen`：正文用哪支笔、当前生成哪支笔（`all` 表示不换笔）。
 - `view`：只在第一次打开时作为默认视图；之后每台设备自己记住看的是哪一页，切换视图不会改写文件。
 - `sync`：上次「正文、参数、程序三者一致」时各自的哈希值，以及程序来源：`generated` 表示生成器输出，`manual` 表示手动编辑或导入的程序。
 

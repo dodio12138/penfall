@@ -101,6 +101,48 @@ function restoreLegacyDraft() {
   } catch { /* Corrupt legacy draft: start empty, the workspace handles its own recovery. */ }
 }
 
+// --- Pens (workspace pen rack) and the draft's drawing ---
+function penList() { return window.Workspace?.pens || Links.DEFAULT_PENS; }
+function penName(index) { return penList()[index - 1]?.name || `笔 ${index}`; }
+function penColor(index) { return penList()[index - 1]?.color || '#30343a'; }
+/** Rebuild the pen pickers after the pen rack changed, keeping valid choices. */
+function renderPenOptions() {
+  for (const [id, withAll] of [['text-pen', false], ['pen', true]]) {
+    const select = $(`#${id}`), value = select.value;
+    select.replaceChildren(...(withAll ? [new Option('全部（不换笔）', 'all')] : []), ...penList().map((pen, index) => new Option(`${index + 1} · ${pen.name}`, String(index + 1))));
+    select.value = [...select.options].some((option) => option.value === value) ? value : select.options[0].value;
+    select.dispatchEvent(new Event('change'));
+  }
+}
+let drawingState = null; // { file, text, model?, error? } for the active draft
+const drawingCache = new Map();
+function setDrawing(file, text) {
+  if (!file) { drawingState = null; return; }
+  const key = `${Links.extname(file)}:${Links.hash(text)}`;
+  if (!drawingCache.has(key)) {
+    try { drawingCache.set(key, { model: Links.extname(file) === '.dxf' ? Drawing.parseDxf(text) : Drawing.parseSvg(text) }); }
+    catch (error) { drawingCache.set(key, { error: error.message }); }
+  }
+  drawingState = { file, text, ...drawingCache.get(key) };
+}
+function drawingPlacement() {
+  if (!drawingState?.model) return null;
+  const read = (id) => Number($(`#drawing-${id}`).value);
+  const placement = { page: Math.min(99, Math.max(1, Math.round(read('page')) || 1)), x: read('x'), y: read('y'), width: read('width') };
+  return [placement.x, placement.y, placement.width].every(Number.isFinite) && placement.width > 0 ? placement : null;
+}
+function setDrawingInputs(placement) {
+  for (const key of ['page', 'x', 'y', 'width']) $(`#drawing-${key}`).value = placement ? String(placement[key]) : '';
+}
+/** Pens with something to write (on one page, or anywhere). */
+function usedPens(page) {
+  const pens = new Set();
+  const textPen = Number($('#text-pen').value) || 1;
+  if ((layout.placements || []).some((item) => page === undefined || item.page === page)) pens.add(textPen);
+  for (const path of layout.paths || []) if (page === undefined || path.page === page) pens.add(path.pen);
+  return [...pens].sort((a, b) => a - b);
+}
+
 /** Same layout as the generator (PathEngine.layoutText); characters without a glyph use system-font widths. */
 function makeLayout() {
   const c = config();
@@ -112,7 +154,9 @@ function makeLayout() {
   const widths = new Map();
   const fallbackAdvance = (char) => { if (!widths.has(char)) widths.set(char, context.measureText(char).width); return widths.get(char); };
   const result = PathEngine.layoutText(content.value, { width, height, margin: Number(c.margin), gutter: Number(c.gutter), size, gap: Number(c['letter-gap']), lineGap: Number(c['line-gap']) }, glyphResolver({ preview: true }), fallbackAdvance);
-  return { width, height, margin: Number(c.margin), gutter: Number(c.gutter), size, font: c.font, paper: c.paper, orientation: c.orientation, placements: result.placements, glyphs: result.placements, missing: result.missing, overflow: result.overflow, pages: result.pages };
+  const placement = drawingPlacement();
+  const paths = placement ? Drawing.placePaths(drawingState.model, placement, penList()) : [];
+  return { width, height, margin: Number(c.margin), gutter: Number(c.gutter), size, font: c.font, paper: c.paper, orientation: c.orientation, placements: result.placements, glyphs: result.placements, paths, missing: result.missing, overflow: result.overflow, pages: Math.max(result.pages, placement?.page || 1) };
 }
 /** Pages included in the current writing set (all / odd / even), in order. */
 function pageSet() {
@@ -153,6 +197,11 @@ function updatePagers() {
 }
 /** After a page is finished: tell the user what to write next. */
 function announceNextPage() {
+  const pen = $('#pen').value;
+  if (pen !== 'all') {
+    const pens = usedPens(currentPage()), next = pens[pens.indexOf(Number(pen)) + 1];
+    if (next) { log(`本页「${penName(Number(pen))}」笔的内容已完成。换上「${penName(next)}」笔，在 G-code 页「笔」中选择 ${next} 后继续。`); return; }
+  }
   if ((layout.pages || 1) <= 1) return;
   const set = pageSet(), next = set[set.indexOf(currentPage()) + 1];
   log(next ? `第 ${currentPage()} 页完成。换纸后点 › 继续写第 ${next} 页。` : `本批次（${$('#page-set').value === 'all' ? '全部页' : $('#page-set').value === 'odd' ? '奇数页' : '偶数页'}）最后一页已完成。${$('#page-set').value === 'odd' ? '双面书写：把整叠纸翻面放回，再选「仅偶数页」。' : ''}`);
@@ -163,10 +212,15 @@ function updateLayoutInfo() {
   if (layout.missing?.length) notes.push(`缺字 ${layout.missing.length} 个（红色为系统字体示意，不能生成）`);
   if (layout.overflow) notes.push(`内容超过 ${PathEngine.MAX_PAGES} 页上限，请拆分文稿`);
   else if (layout.pages > 1) notes.push(`共 ${layout.pages} 页，每页单独生成与书写，换纸后再发送下一页`);
+  if (drawingState?.error) notes.push(`图形无法解析：${drawingState.error}`);
+  const legend = $('#pen-legend');
+  legend.replaceChildren(...usedPens(currentPage()).map((pen) => { const chip = document.createElement('span'); chip.className = 'pen-chip'; chip.style.setProperty('--pen', penColor(pen)); chip.textContent = penName(pen); return chip; }));
+  legend.hidden = usedPens().length < 2;
   $('#layout-status').textContent = notes.join('；');
   $('#paper-mode').textContent = glyphPreview && glyphLibraries.has(glyphPreview) ? `字库预览：${glyphCatalog.get(glyphPreview)?.name}（未应用）` : layout.missing?.length ? '单线笔迹 + 缺字示意' : '单线笔迹预览';
   updatePagers();
   updateOriginSummary();
+  if (typeof updatePenPicker === 'function') updatePenPicker();
 }
 function previewZoom(stage) {
   const choice = $('#zoom').value;
@@ -215,7 +269,7 @@ function renderPreview() {
       continue;
     }
     const scale = size / item.glyph.unitsPerEm;
-    ctx.strokeStyle = ctx.fillStyle = '#30343a';
+    ctx.strokeStyle = ctx.fillStyle = penColor(Number($('#text-pen').value) || 1);
     ctx.lineWidth = window.Workspace?.penWidth || .5; // real pen width in mm
     ctx.beginPath();
     for (const stroke of item.glyph.strokes) {
@@ -228,6 +282,15 @@ function renderPreview() {
       ctx.fillStyle = '#1766aa';
       ctx.fillRect(item.x, item.y + size + .6, item.width, .4);
     }
+  }
+  ctx.lineWidth = window.Workspace?.penWidth || .5;
+  for (const path of (layout.paths || []).filter((item) => item.page === page)) {
+    ctx.strokeStyle = penColor(path.pen);
+    ctx.beginPath();
+    ctx.moveTo(...path.points[0]);
+    if (path.points.length === 1) ctx.lineTo(path.points[0][0] + .01, path.points[0][1]);
+    for (const point of path.points.slice(1)) ctx.lineTo(...point);
+    ctx.stroke();
   }
   drawOriginMarker(ctx);
 }
