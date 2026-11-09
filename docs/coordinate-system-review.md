@@ -6,7 +6,7 @@
 
 参考仓库：[cncjs/cncjs](https://github.com/cncjs/cncjs)，MIT 许可。
 
-本地只读参考副本：`/Users/levy/Documents/PiWorkStation/cncjs-reference`。
+参考：CNCjs 源码（本地只读副本，未复制代码）。
 
 此次检查提交：`a3922a1bf24416376d6fb67707559549c184f35a`。仅参考架构与协议解释，没有把 CNCjs 代码复制到本项目。
 
