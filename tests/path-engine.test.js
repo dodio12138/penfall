@@ -55,6 +55,14 @@ test('pen origin and axis directions shift / flip generated coordinates', () => 
   assert.throws(()=>generate('A',{...options,origin:{x:0,y:0,dirX:2,dirY:1}}),/笔起点/);
 });
 
+test('binding gutter mirrors on odd / even pages; zero gutter changes nothing', () => {
+  const text='HELLO WORLD\n'.repeat(80);
+  const plain=layoutText(text,options), bound=layoutText(text,{...options,gutter:10});
+  const first=(result,page)=>result.placements.find(item=>item.page===page).x;
+  assert.equal(first(bound,1),first(plain,1)+10);
+  assert.equal(first(bound,2),first(plain,2));
+  assert.deepEqual(layoutText(text,{...options,gutter:0}),plain);
+});
 test('long text flows onto further pages; each page is generated separately', () => {
   const text='HELLO WORLD\n'.repeat(80);
   const layout=layoutText(text,options);

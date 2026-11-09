@@ -83,6 +83,7 @@ function applyHardware(state) {
     resetSimulation();
     updateTask();
     $('#task-state').textContent = state.state === 'complete' ? '设备已 Idle' : state.state === 'error' ? '设备错误' : '已停止';
+    if (state.state === 'complete' && traceVerified) announceNextPage();
     $('#task-mode').textContent = '刀轨模拟';
     $('#execution-mode').textContent = '当前：仅模拟';
     $('#execution-mode').hidden = true;

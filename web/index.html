@@ -44,6 +44,9 @@
         <label>预览字体<select id="font"><option value="serif">系统衬线字体</option><option value="sans-serif">系统无衬线字体</option><option value="cursive">系统手写体</option></select></label>
         <div class="field-row"><label>字高 / mm<input id="font-size" type="number" min="2" max="15" step="0.5" value="5" /></label><label>行距 / mm<input id="line-gap" type="number" min="0" max="15" step="0.5" value="3" /></label></div>
         <div class="field-row"><label>字距 / mm<input id="letter-gap" type="number" min="0" max="10" step="0.5" value="1" /></label><label>页边距 / mm<input id="margin" type="number" min="5" max="40" step="1" value="20" /></label></div>
+        <h3 class="field-heading">书写管理</h3>
+        <div class="field-row"><label>书写页<select id="page-set"><option value="all">全部页</option><option value="odd">仅奇数页</option><option value="even">仅偶数页</option></select></label><label title="双面书写：奇数页留在左侧，偶数页留在右侧">装订线 / mm<input id="gutter" type="number" min="0" max="40" step="1" value="0" /></label></div>
+        <p class="sidebar-note">双面书写：先选「仅奇数页」逐页写完，把整叠纸翻面放回，再选「仅偶数页」。</p>
 
       </div></section>
       <section id="motion-section"><h2>G-code / 笔轴参数</h2><div class="settings-fields"><div class="field-row"><label>速度 mm/min<input id="feed" type="number" value="1200" min="10" max="10000" /></label><label>抬笔 Z / mm<input id="pen-up" type="number" value="5" min="-50" max="50" step="0.5" /></label></div><h3 class="field-heading">机器 · 本工作区共用</h3><label>笔宽 / mm<input id="pen-width" type="number" min="0.05" max="5" step="0.05" value="0.5" title="笔尖在纸上画出的线宽，用于纸张与刀轨预览" /></label><input id="page" type="number" min="1" max="99" step="1" value="1" hidden aria-hidden="true" /><label>落笔 Z / mm<input id="pen-down" type="number" value="0" min="-50" max="50" step="0.5" /></label>

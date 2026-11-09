@@ -3,8 +3,8 @@
 const LEGACY_DRAFT_KEYS = ['web-typewriter:workspace:v2', 'web-typewriter:draft:v1'];
 const title = $('#title');
 const content = $('#content');
-const settings = ['paper', 'orientation', 'font', 'font-size', 'line-gap', 'letter-gap', 'margin'];
-const defaults = { paper: 'a4', orientation: 'portrait', font: 'serif', 'font-size': '5', 'line-gap': '3', 'letter-gap': '1', margin: '20' };
+const settings = ['paper', 'orientation', 'font', 'font-size', 'line-gap', 'letter-gap', 'margin', 'gutter'];
+const defaults = { paper: 'a4', orientation: 'portrait', font: 'serif', 'font-size': '5', 'line-gap': '3', 'letter-gap': '1', margin: '20', gutter: '0' };
 const PAPER_SIZES = { a4: [210, 297], a5: [148, 210] };
 const PREVIEW_PX_PER_MM = 2.5;
 const ORIGIN_DEFAULTS = { 'origin-corner': 'bottom-left', 'origin-x': '0', 'origin-y': '0', 'x-dir': '1', 'y-dir': '1' };
@@ -111,28 +111,51 @@ function makeLayout() {
   context.font = `${size}px ${c.font}`;
   const widths = new Map();
   const fallbackAdvance = (char) => { if (!widths.has(char)) widths.set(char, context.measureText(char).width); return widths.get(char); };
-  const result = PathEngine.layoutText(content.value, { width, height, margin: Number(c.margin), size, gap: Number(c['letter-gap']), lineGap: Number(c['line-gap']) }, glyphResolver(), fallbackAdvance);
-  return { width, height, margin: Number(c.margin), size, font: c.font, paper: c.paper, orientation: c.orientation, placements: result.placements, glyphs: result.placements, missing: result.missing, overflow: result.overflow, pages: result.pages };
+  const result = PathEngine.layoutText(content.value, { width, height, margin: Number(c.margin), gutter: Number(c.gutter), size, gap: Number(c['letter-gap']), lineGap: Number(c['line-gap']) }, glyphResolver({ preview: true }), fallbackAdvance);
+  return { width, height, margin: Number(c.margin), gutter: Number(c.gutter), size, font: c.font, paper: c.paper, orientation: c.orientation, placements: result.placements, glyphs: result.placements, missing: result.missing, overflow: result.overflow, pages: result.pages };
 }
-/** Page being previewed / generated (1-based), clamped to the current layout. */
+/** Pages included in the current writing set (all / odd / even), in order. */
+function pageSet() {
+  const set = $('#page-set').value;
+  const all = Array.from({ length: layout.pages || 1 }, (_, i) => i + 1);
+  const pages = set === 'odd' ? all.filter((page) => page % 2) : set === 'even' ? all.filter((page) => !(page % 2)) : all;
+  return pages.length ? pages : [1];
+}
+/** Page being previewed / generated (1-based): the requested page, moved into the current set if needed. */
 function currentPage() {
   const requested = Number($('#page').value);
-  return Math.min(Math.max(1, Number.isInteger(requested) ? requested : 1), layout.pages || 1);
+  const pages = pageSet();
+  const wanted = Math.min(Math.max(1, Number.isInteger(requested) ? requested : 1), layout.pages || 1);
+  return pages.includes(wanted) ? wanted : pages.find((page) => page >= wanted) || pages.at(-1);
 }
 function setPage(page) {
-  const next = Math.min(Math.max(1, page), layout.pages || 1);
+  const pages = pageSet();
+  const next = pages.includes(page) ? page : pages[0];
   if (next === Number($('#page').value)) return;
   $('#page').value = String(next);
   $('#page').dispatchEvent(new Event('input', { bubbles: true }));
 }
+/** Step to the previous / next page inside the writing set. */
+function stepPage(direction) {
+  const pages = pageSet(), index = pages.indexOf(currentPage());
+  const next = pages[index + direction];
+  if (next) setPage(next);
+}
 function updatePagers() {
-  const page = currentPage(), pages = layout.pages || 1;
+  const page = currentPage(), pages = layout.pages || 1, set = pageSet(), index = set.indexOf(page);
+  const label = $('#page-set').value === 'all' ? `第 ${page} / ${pages} 页` : `第 ${page} 页 · ${$('#page-set').value === 'odd' ? '奇数页' : '偶数页'} ${index + 1}/${set.length}`;
   for (const pager of $$('.pager')) {
     pager.hidden = pages <= 1;
-    pager.querySelector('.pager-label').textContent = `第 ${page} / ${pages} 页`;
-    pager.querySelector('.pager-prev').disabled = page <= 1;
-    pager.querySelector('.pager-next').disabled = page >= pages;
+    pager.querySelector('.pager-label').textContent = label;
+    pager.querySelector('.pager-prev').disabled = index <= 0;
+    pager.querySelector('.pager-next').disabled = index >= set.length - 1;
   }
+}
+/** After a page is finished: tell the user what to write next. */
+function announceNextPage() {
+  if ((layout.pages || 1) <= 1) return;
+  const set = pageSet(), next = set[set.indexOf(currentPage()) + 1];
+  log(next ? `第 ${currentPage()} 页完成。换纸后点 › 继续写第 ${next} 页。` : `本批次（${$('#page-set').value === 'all' ? '全部页' : $('#page-set').value === 'odd' ? '奇数页' : '偶数页'}）最后一页已完成。${$('#page-set').value === 'odd' ? '双面书写：把整叠纸翻面放回，再选「仅偶数页」。' : ''}`);
 }
 function updateLayoutInfo() {
   $('#paper-info').textContent = `${layout.paper.toUpperCase()} · ${layout.orientation === 'landscape' ? '横向' : '纵向'} · ${layout.width} × ${layout.height} mm`;
@@ -141,7 +164,7 @@ function updateLayoutInfo() {
   if (layout.overflow) notes.push(`内容超过 ${PathEngine.MAX_PAGES} 页上限，请拆分文稿`);
   else if (layout.pages > 1) notes.push(`共 ${layout.pages} 页，每页单独生成与书写，换纸后再发送下一页`);
   $('#layout-status').textContent = notes.join('；');
-  $('#paper-mode').textContent = layout.missing?.length ? '单线笔迹 + 缺字示意' : '单线笔迹预览';
+  $('#paper-mode').textContent = glyphPreview && glyphLibraries.has(glyphPreview) ? `字库预览：${glyphCatalog.get(glyphPreview)?.name}（未应用）` : layout.missing?.length ? '单线笔迹 + 缺字示意' : '单线笔迹预览';
   updatePagers();
   updateOriginSummary();
 }
@@ -175,7 +198,8 @@ function renderPreview() {
   ctx.strokeStyle = '#dadfe5';
   ctx.lineWidth = 0.25;
   ctx.setLineDash([2, 2]);
-  ctx.strokeRect(margin, margin, width - 2 * margin, height - 2 * margin);
+  const binding = currentPage() % 2 ? layout.gutter || 0 : 0, bindingRight = currentPage() % 2 ? 0 : layout.gutter || 0;
+  ctx.strokeRect(margin + binding, margin, width - 2 * margin - binding - bindingRight, height - 2 * margin);
   ctx.setLineDash([]);
   ctx.font = `${size}px ${font}`;
   ctx.textBaseline = 'top';
@@ -284,8 +308,8 @@ $('.view-tabs').addEventListener('keydown', (event) => {
 });
 $('#zoom').addEventListener('change', renderPreview);
 for (const pager of $$('.pager')) {
-  pager.querySelector('.pager-prev').addEventListener('click', () => setPage(currentPage() - 1));
-  pager.querySelector('.pager-next').addEventListener('click', () => setPage(currentPage() + 1));
+  pager.querySelector('.pager-prev').addEventListener('click', () => stepPage(-1));
+  pager.querySelector('.pager-next').addEventListener('click', () => stepPage(1));
 }
 $('#sidebar-toggle').addEventListener('click', () => document.body.classList.toggle('sidebar-hidden'));
 if (window.innerWidth <= 900) document.body.classList.add('sidebar-hidden');

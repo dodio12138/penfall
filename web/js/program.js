@@ -4,7 +4,7 @@ const LEGACY_PROGRAM_KEYS = { code: 'web-typewriter:gcode:v1', dirty: 'web-typew
 const SIM_TICK_MS = 50;
 const SIM_RAPID_FEED = 3000; // mm/min estimate for G0 travel moves.
 const codeEditor = $('#gcode');
-const motionInputs = ['feed', 'pen-up', 'pen-down', 'origin-corner', 'origin-x', 'origin-y', 'x-dir', 'y-dir', 'page'];
+const motionInputs = ['feed', 'pen-up', 'pen-down', 'origin-corner', 'origin-x', 'origin-y', 'x-dir', 'y-dir', 'page', 'page-set'];
 let toolpath = PathEngine.parse('');
 let programDirty = false;
 // 'generated': exact generator output → kept in sync automatically. 'manual': edited / imported → never rewritten.
@@ -76,7 +76,7 @@ function setProgram(text, view, source = 'manual', options) {
 function buildProgram() {
   if (!settings.every((id) => validSetting(id, $(`#${id}`).value)) || !motionInputs.every((id) => $(`#${id}`).checkValidity() && $(`#${id}`).value !== '')) throw Error('请修正排版或笔轴参数。');
   const c = config();
-  return PathEngine.generate(content.value, { width: layout.width, height: layout.height, margin: +c.margin, size: +c['font-size'], gap: +c['letter-gap'], lineGap: +c['line-gap'], feed: +$('#feed').value, penUp: +$('#pen-up').value, penDown: +$('#pen-down').value, origin: penOrigin(), resolve: glyphResolver(), page: currentPage() });
+  return PathEngine.generate(content.value, { width: layout.width, height: layout.height, margin: +c.margin, gutter: +c.gutter, size: +c['font-size'], gap: +c['letter-gap'], lineGap: +c['line-gap'], feed: +$('#feed').value, penUp: +$('#pen-up').value, penDown: +$('#pen-down').value, origin: penOrigin(), resolve: glyphResolver(), page: currentPage() });
 }
 function generateProgram(view = 'gcode') {
   clearTimeout(regenerateTimer);
@@ -124,6 +124,7 @@ function stepSimulation(cursor) {
     clearInterval(simulation.timer);
     simulation.state = 'complete';
     log('刀轨模拟完成，未向机器发送指令。');
+    announceNextPage();
   }
   highlightLine(toolpath.segments[Math.min(cursor.index, toolpath.segments.length - 1)]?.line);
   updateTask();
@@ -194,12 +195,13 @@ codeEditor.addEventListener('input', () => {
   parseTimer = setTimeout(parseProgram, 250);
 });
 codeEditor.addEventListener('scroll', () => { $('#gcode-lines').scrollTop = codeEditor.scrollTop; });
-for (const field of [content, ...settings.map((id) => $(`#${id}`)), ...motionInputs.filter((id) => id !== 'page').map((id) => $(`#${id}`))]) {
+for (const field of [content, ...settings.map((id) => $(`#${id}`)), ...motionInputs.filter((id) => !['page', 'page-set'].includes(id)).map((id) => $(`#${id}`))]) {
   field.addEventListener('input', () => { resetSimulation(); markStale(); updateTask(); scheduleRegenerate(); });
 }
 for (const id of motionInputs) $(`#${id}`).addEventListener('input', () => { window.Workspace?.capture(); renderPreview(); drawToolpath(); });
 for (const id of ['machine-x', 'machine-y']) $(`#${id}`).addEventListener('input', updateOriginSummary);
 // Switching pages only changes generator output; imported / edited programs are unaffected.
+$('#page-set').addEventListener('input', () => { setPage(currentPage()); updatePagers(); });
 $('#page').addEventListener('input', () => { if (programSource === 'generated') { resetSimulation(); markStale(); updateTask(); scheduleRegenerate(); } });
 $('#start').addEventListener('click', startSimulation);
 $('#pause').addEventListener('click', () => {

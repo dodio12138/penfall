@@ -6,7 +6,7 @@
   const CURRENT_KEY = 'web-typewriter:workspace:current';
   const MIGRATED_KEY = 'web-typewriter:migrated-to-files';
   const SAVE_DELAY = 300;
-  const motionDefaults = { feed: '1200', 'pen-up': '5', 'pen-down': '0', page: '1', ...ORIGIN_DEFAULTS };
+  const motionDefaults = { feed: '1200', 'pen-up': '5', 'pen-down': '0', page: '1', 'page-set': 'all', ...ORIGIN_DEFAULTS };
   const TYPE_LABEL = { '.txt': 'TXT', '.md': 'MD', '.gcode': 'GC', '.nc': 'NC', '.tap': 'TAP', '.wtw': 'WS', '.wtl': '稿' };
 
   let fsys = null;

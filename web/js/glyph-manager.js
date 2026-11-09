@@ -9,7 +9,22 @@ let glyphText = '';
 let glyphPanelTimer;
 const glyphLoading = new Map();
 
-function glyphResolver() { return Glyphs.createResolver(glyphSelection, glyphLibraries); }
+let glyphPreview = null; // library id previewed on the paper (hover / 👁), never used for generation
+let glyphPreviewPinned = false;
+function previewSelection() {
+  if (!glyphPreview || !glyphLibraries.has(glyphPreview)) return glyphSelection;
+  return { ...glyphSelection, libraries: [glyphPreview, ...glyphSelection.libraries.filter((id) => id !== glyphPreview)], prefer: {}, pins: [] };
+}
+/** Generation always uses the saved selection; the paper preview may show a temporary library preview. */
+function glyphResolver({ preview = false } = {}) { return Glyphs.createResolver(preview ? previewSelection() : glyphSelection, glyphLibraries); }
+function setGlyphPreview(id) {
+  if (glyphPreview === id) return;
+  glyphPreview = id;
+  if (id) ensureGlyphLibrary(id);
+  layout = makeLayout();
+  renderPreview();
+  for (const row of $$('#glyph-libraries .glyph-library')) row.classList.toggle('previewing', row.dataset.id === id);
+}
 function glyphCandidates(char) { return Glyphs.candidates(glyphSelection, glyphLibraries, char); }
 function glyphLocked() {
   return Boolean(window.Workspace && (!window.Workspace.activeId || window.Workspace.blocked)) || (typeof hardwareJob !== 'undefined' && (hardwareJob || controllerBusy()));
@@ -43,9 +58,12 @@ function registerLibrary(library, origin, extra = {}) {
 }
 /** Load selected server libraries on demand; re-layout once they arrive. */
 function ensureGlyphLibraries() {
-  for (const id of glyphSelection.libraries) {
-    const entry = glyphCatalog.get(id);
-    if (glyphLibraries.has(id) || entry?.origin !== 'server' || glyphLoading.has(id)) continue;
+  for (const id of glyphSelection.libraries) ensureGlyphLibrary(id);
+}
+function ensureGlyphLibrary(id) {
+  const entry = glyphCatalog.get(id);
+  {
+    if (glyphLibraries.has(id) || entry?.origin !== 'server' || glyphLoading.has(id)) return;
     glyphLoading.set(id, fetch(`./glyphs/${encodeURIComponent(entry.file)}`)
       .then((response) => { if (!response.ok) throw Error(`HTTP ${response.status}`); return response.json(); })
       .then((raw) => { registerLibrary(Glyphs.normalizeLibrary(raw), 'server', { file: entry.file }); glyphLibrariesArrived(); })
@@ -83,6 +101,7 @@ async function loadGlyphCatalog() {
 
 // --- Selection changes (all go through here so preview, program and storage stay in sync). ---
 function setGlyphSelection(raw, text) {
+  glyphPreview = null; glyphPreviewPinned = false;
   glyphSelection = Glyphs.normalizeSelection(raw);
   glyphText = text;
   ensureGlyphLibraries();
@@ -145,8 +164,12 @@ function renderGlyphLibraries(locked) {
   list.replaceChildren(...ids.map((id) => {
     const entry = glyphCatalog.get(id);
     const enabled = selected.includes(id);
-    const row = element('div', `glyph-library${enabled ? ' enabled' : ''}${entry ? '' : ' missing'}`);
+    const row = element('div', `glyph-library${enabled ? ' enabled' : ''}${entry ? '' : ' missing'}${glyphPreview === id ? ' previewing' : ''}`);
     row.setAttribute('role', 'listitem');
+    row.dataset.id = id;
+    // Hovering a library previews the whole paper in it (mouse); 👁 toggles the preview (touch / keyboard).
+    row.addEventListener('pointerenter', (event) => { if (event.pointerType === 'mouse' && glyphLibraries.has(id)) setGlyphPreview(id); });
+    row.addEventListener('pointerleave', (event) => { if (event.pointerType === 'mouse' && !glyphPreviewPinned) setGlyphPreview(null); });
     const label = element('label', 'glyph-library-name');
     const check = element('input');
     check.type = 'checkbox'; check.checked = enabled; check.disabled = locked || (!entry && !enabled);
@@ -170,11 +193,26 @@ function renderGlyphLibraries(locked) {
       button('↑', '提高优先级', () => updateGlyphSelection((next) => { next.libraries.splice(index, 1); next.libraries.splice(index - 1, 0, id); }), locked || index === 0);
       button('↓', '降低优先级', () => updateGlyphSelection((next) => { next.libraries.splice(index, 1); next.libraries.splice(index + 1, 0, id); }), locked || index === selected.length - 1);
     }
+    if (entry) button(glyphPreviewPinned && glyphPreview === id ? '◉' : '👁', glyphPreviewPinned && glyphPreview === id ? '结束预览' : '在纸张上预览此字库', () => { const on = !(glyphPreviewPinned && glyphPreview === id); glyphPreviewPinned = on; setGlyphPreview(on ? id : null); renderGlyphPanel(); }, false);
     if (glyphLibraries.has(id)) button('⤓', '导出字库 JSON', () => exportGlyphLibrary(id), false);
     if (entry?.origin === 'user') button('×', '从本浏览器删除字库', () => deleteGlyphLibrary(id));
-    row.append(label, actions, meta);
+    row.append(label, actions, meta, librarySample(id));
     return row;
   }));
+}
+/** A strip of the current text (or a default sample) written in one library. */
+function librarySample(id) {
+  const strip = element('div', 'glyph-sample');
+  const library = glyphLibraries.get(id);
+  if (!library) { strip.textContent = glyphLoading.has(id) ? '加载中…' : '点 👁 加载并预览'; return strip; }
+  const fromText = distinctChars($('#content').value).filter((char) => library.chars.has(char));
+  const sample = (fromText.length >= 4 ? fromText : Array.from('AaBb 永和 123').filter((char) => library.chars.has(char))).slice(0, 12);
+  if (!sample.length) { strip.textContent = '与当前正文没有共同的字'; return strip; }
+  for (const char of sample) {
+    const variant = library.chars.get(char)[0];
+    strip.append(glyphSvg({ unitsPerEm: library.unitsPerEm, advance: variant.advance, strokes: variant.strokes }, 18));
+  }
+  return strip;
 }
 function distinctChars(text) {
   return [...new Set(Array.from(text).filter((char) => !/\s/.test(char)))];
@@ -347,6 +385,8 @@ window.addEventListener('workspace-view', () => closeGlyphPicker());
 window.addEventListener('resize', () => closeGlyphPicker());
 
 // --- Panel controls ---
+// Rows are re-rendered while hovering (e.g. a library finishes loading): leaving the list always ends a hover preview.
+$('#glyph-libraries').addEventListener('pointerleave', (event) => { if (event.pointerType === 'mouse' && !glyphPreviewPinned) setGlyphPreview(null); });
 $('#glyph-strategy').addEventListener('change', (event) => updateGlyphSelection((next) => { next.strategy = event.target.value; }));
 $('#glyph-seed').addEventListener('change', (event) => {
   const seed = Number(event.target.value);

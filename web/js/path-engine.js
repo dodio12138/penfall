@@ -13,22 +13,25 @@
    */
   function layoutText(text, options, resolve = defaultResolver(), fallbackAdvance = () => options.size * WHITESPACE_ADVANCE) {
     const { width, height, margin, size, gap, lineGap } = options;
+    // Binding gutter for double-sided writing: left side on odd pages, right side on even pages.
+    const gutter = options.gutter || 0;
+    const left = (page) => margin + (page % 2 ? gutter : 0), right = (page) => width - margin - (page % 2 ? 0 : gutter);
     const chars = Array.from(text);
     const placements = [], missing = new Set();
-    let x = margin, y = margin, page = 1, overflow = false;
+    let page = 1, x = left(1), y = margin, overflow = false;
     for (let index = 0; index < chars.length; index++) {
       let char = chars[index];
       if (char === '\r') { if (chars[index + 1] === '\n') continue; char = '\n'; }
-      if (char === '\n') { x = margin; y += size + lineGap; continue; }
+      if (char === '\n') { x = left(page); y += size + lineGap; continue; }
       const blank = /\s/.test(char);
       const glyph = blank ? null : resolve(index, char);
       if (!blank && !glyph) missing.add(char);
       const body = blank ? (char === '\t' ? 4 * (size * WHITESPACE_ADVANCE + gap) - gap : size * WHITESPACE_ADVANCE) : glyph ? glyph.advance / glyph.unitsPerEm * size : fallbackAdvance(char);
-      if (x + body > width - margin && x > margin) { x = margin; y += size + lineGap; }
+      if (x + body > right(page) && x > left(page)) { x = left(page); y += size + lineGap; }
       if (y + size > height - margin) {
         // Continue on a new sheet; the machine writes one page per program.
         if (page >= MAX_PAGES) { overflow = true; break; }
-        page++; x = margin; y = margin;
+        page++; x = left(page); y = margin;
       }
       if (!blank) placements.push({ index, char, x, y, page, width: body, glyph });
       x += body + gap;

@@ -229,3 +229,8 @@ body.sidebar-hidden .sidebar { display: none; }
 .pager { display: inline-flex; align-items: center; gap: 4px; }
 .pager button { min-height: 28px; min-width: 28px; padding: 0 6px; font-size: 14px; line-height: 1; }
 .pager-label { min-width: 74px; text-align: center; font-variant-numeric: tabular-nums; color: var(--text); font-size: 11px; }
+.glyph-sample { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 1px; padding: 4px 0 0 23px; min-height: 22px; color: var(--text); font-size: 10px; }
+.glyph-sample:not(:has(svg)) { color: var(--quiet); }
+.glyph-sample .glyph-thumb { stroke-width: 1.3; }
+.glyph-library.previewing { border-color: var(--accent); }
+#paper-mode { max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
