@@ -1,0 +1,43 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const { generate, parse } = require('../path-engine.js');
+const options = { width:210,height:297,margin:20,size:5,gap:1,lineGap:3,feed:1200,penUp:5,penDown:0 };
+test('single-line text generates finite, bounded XY paths and raised final pen', () => {
+  const result=parse(generate('Hello 123!',options));
+  assert.deepEqual(result.errors,[]);
+  assert(result.segments.some(s=>s.drawing));
+  assert(result.bounds.minX>=0 && result.bounds.maxX<=210);
+  assert(result.bounds.minY>=0 && result.bounds.maxY<=297);
+  assert.equal(result.segments.at(-1).to.z,5);
+});
+test('unsupported Chinese is rejected instead of rendered as fake strokes', () => assert.throws(()=>generate('你好',options),/单线字库暂不支持/));
+test('overflow and invalid pen profiles rejected', () => {
+  assert.throws(()=>generate('A'.repeat(10000),options),/超出/);
+  assert.throws(()=>generate('A',{...options,penUp:0}),/参数无效/);
+});
+test('square includes travel, writing, source lines and Z bounds', () => {
+  const result=parse(fs.readFileSync(require('node:path').join(__dirname,'../demo.gcode'),'utf8'));
+  assert.deepEqual(result.errors,[]);
+  assert.equal(result.bounds.maxX,40);
+  assert.equal(result.bounds.maxZ,5);
+  assert.equal(result.segments.filter(s=>s.drawing&&s.from.z===0&&s.to.z===0).length,4);
+  assert(result.segments.every(s=>s.line>0));
+});
+test('relative and inch coordinates supported', () => {
+  const result=parse('G20\nG91\nG1 X1 Y1 F10\nX1');
+  assert.deepEqual(result.errors,[]);
+  assert.equal(result.segments.at(-1).to.x,50.8);
+  assert.equal(result.segments.at(-1).to.y,25.4);
+});
+test('IJ arcs interpolated and bad radii blocked', () => {
+  const result=parse('G21\nG90\nG0 X10 Y0\nG3 X0 Y10 I-10 J0 F100');
+  assert.deepEqual(result.errors,[]);
+  assert(result.segments.length>10);
+  assert.deepEqual(result.segments.at(-1).to,{x:0,y:10,z:0});
+  assert(parse('G0 X10\nG3 X0 Y20 I-10 J0').errors.length);
+});
+test('unknown commands, coordinate transforms and invalid feeds block execution', () => {
+  for(const code of ['G28','G92 X0','G2 X10 R5','M280 P0 S90','G1 F0 X1','G1 X1 X2','G1 X1 garbage','%']) assert(parse(code).errors.length,code);
+});
