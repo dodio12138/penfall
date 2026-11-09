@@ -1,32 +1,49 @@
 'use strict';
-// Requires Playwright and a running UI server; runs in an isolated browser context.
+// Workspace / file tree / drafts / 梳串. Needs Playwright and a running server.py (any --workspaces dir).
+// Runs in isolated browser contexts; the server workspace part creates a uniquely named workspace.
 const { chromium } = require('playwright');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const path = require('node:path');
+const url = process.env.TEST_URL || 'http://127.0.0.1:5173';
+const key = fs.readFileSync(path.join(__dirname, '../.bridge-key'), 'utf8').trim();
+
 (async () => {
   const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || undefined, headless: true });
   try {
-    const context = await browser.newContext({ viewport: { width:1440, height:1000 } });
+    const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, acceptDownloads: true });
     const page = await context.newPage();
     const errors = [];
-    page.on('pageerror', error => errors.push(error.message));
-    page.on('dialog', dialog => { errors.push(`Unexpected native dialog: ${dialog.type()}`); dialog.dismiss(); });
-    async function acceptAction(name) {
-      await page.locator('#action-dialog').waitFor({state:'visible'});
+    page.on('pageerror', (error) => errors.push(error.message));
+    page.on('dialog', (dialog) => { errors.push(`Unexpected native dialog: ${dialog.type()}`); dialog.dismiss(); });
+    const accept = async (name) => {
+      await page.locator('#action-dialog').waitFor({ state: 'visible' });
       if (name !== undefined) await page.locator('#action-name').fill(name);
       await page.locator('#action-accept').click();
-      await page.locator('#action-dialog').waitFor({state:'hidden'});
-    }
-    const url = process.env.TEST_URL || 'http://127.0.0.1:5173';
+      await page.locator('#action-dialog').waitFor({ state: 'hidden' });
+    };
+    const saved = () => page.waitForFunction(() => document.querySelector('#save-indicator').textContent === '已保存');
+    const row = (name) => page.locator('#file-tree .tree-row').filter({ has: page.locator('.tree-name', { hasText: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`) }) });
+    const rowPath = (path) => page.locator(`#file-tree .tree-row[data-path="${path}"]`);
+    const treeNames = () => page.locator('#file-tree .tree-name').allTextContents();
+    const logText = () => page.locator('#log').innerText();
+
+    // Fresh browser: a workspace with one empty draft is created and opened.
     await page.goto(url);
     await page.locator('#content').fill('HELLO HELLO 123');
+    assert.match(await page.locator('#workspace-switcher').inputValue(), /^browser:/);
     await page.locator('#gcode-tab').click();
     await page.locator('#generate-code').click();
     const firstCode = await page.locator('#gcode').inputValue();
     assert(firstCode.includes('G21'));
+    await saved();
+    await row('未命名').locator('.tree-twisty').click();
+    assert.deepEqual(await treeNames(), ['未命名', '未命名.gcode', '未命名.txt', 'workspace.wtw']);
+
+    // New draft is independent (text, program, parameters).
     await page.locator('#new-document').click();
-    await acceptAction('第二份.txt');
-    await page.waitForFunction(() => document.querySelectorAll('#document-list .document-entry').length === 2);
+    await accept('第二份');
+    await page.waitForFunction(() => document.title.startsWith('第二份'));
     assert.equal(await page.locator('#content').inputValue(), '');
     assert.equal(await page.locator('#gcode').inputValue(), '');
     await page.locator('#content').fill('SECOND');
@@ -34,14 +51,20 @@ const fs = require('node:fs');
     await page.locator('#font-size').fill('8');
     await page.locator('#feed').fill('900');
     await page.locator('[data-panel=files]').click();
-    await page.locator('#rename-document').click();
-    await acceptAction('已重命名.txt');
-    await page.waitForFunction(() => document.title.startsWith('已重命名.txt'));
-    assert((await page.locator('#window-title').textContent()).includes('已重命名.txt'));
-    await page.locator('#document-tabs .document-tab-name').first().click();
+    await saved();
+    // Rename a draft: link, text (and program) are renamed together; tab and title follow.
+    await row('第二份').click();
+    await page.keyboard.press('F2');
+    await accept('已重命名');
+    await page.waitForFunction(() => document.title.startsWith('已重命名'));
+    assert((await treeNames()).includes('已重命名'));
+    assert(!(await treeNames()).includes('第二份'));
+    await page.locator('#document-tabs .document-tab-name').filter({ hasText: '未命名' }).click();
     assert.equal(await page.locator('#content').inputValue(), 'HELLO HELLO 123');
     assert.equal(await page.locator('#gcode').inputValue(), firstCode);
     assert.equal(await page.locator('#font-size').inputValue(), '5');
+
+    // Find / replace still edits the real document.
     await page.locator('#edit-tab').click();
     await page.keyboard.press('ControlOrMeta+f');
     await page.locator('#find-query').fill('HELLO');
@@ -50,103 +73,167 @@ const fs = require('node:fs');
     await page.locator('#replace-all').click();
     assert.equal(await page.locator('#content').inputValue(), 'HI HI 123');
     await page.locator('#find-close').click();
-    await page.locator('#duplicate-document').click();
-    assert.equal(await page.locator('#document-list .document-entry').count(), 3);
-    await page.locator('#delete-document').click();
-    await acceptAction();
-    await page.waitForFunction(() => document.querySelectorAll('#document-list .document-entry').length === 2);
-    assert.equal(await page.locator('#document-list .document-entry').count(), 2);
-    await page.locator('#file-filter').fill('SECOND');
-    assert.equal(await page.locator('#document-list .document-entry').count(), 1);
-    await page.locator('#file-filter').fill('');
-    await page.locator('#document-tabs .document-tab-name').filter({ hasText:'已重命名.txt' }).click();
-    assert.equal(await page.locator('#feed').inputValue(), '900');
-    assert.equal(await page.locator('#font-size').inputValue(), '8');
-    await page.reload();
+    // Generated program follows the text automatically.
+    await page.waitForFunction((code) => document.querySelector('#gcode').value !== code, firstCode);
+    await saved();
+
+    // Folder, drag & drop, context-menu copy and delete.
+    await page.locator('#new-folder').click();
+    await accept('信件');
+    await page.waitForFunction(() => [...document.querySelectorAll('#file-tree .tree-name')].some((el) => el.textContent === '信件'));
+    await row('已重命名').dragTo(row('信件'));
+    await page.waitForFunction(() => [...document.querySelectorAll('#file-tree .tree-row')].some((el) => el.dataset.path === '信件/已重命名.wtl'));
+    await page.locator('#document-tabs .document-tab-name').filter({ hasText: '已重命名' }).click();
     assert.equal(await page.locator('#content').inputValue(), 'SECOND');
     assert.equal(await page.locator('#feed').inputValue(), '900');
-    let downloaded = page.waitForEvent('download');
+    await row('已重命名').click({ button: 'right' });
+    await page.locator('.context-menu button', { hasText: '创建副本' }).click();
+    await page.waitForFunction(() => [...document.querySelectorAll('#file-tree .tree-name')].some((el) => el.textContent === '已重命名 副本'));
+    await row('已重命名 副本').locator('.tree-more').click();
+    await page.locator('.context-menu button', { hasText: '删除' }).click();
+    await accept();
+    await page.waitForFunction(() => ![...document.querySelectorAll('#file-tree .tree-name')].some((el) => el.textContent === '已重命名 副本'));
+    await page.locator('#file-filter').fill('重命名');
+    assert.deepEqual(await treeNames(), ['信件', '已重命名', '已重命名.txt']);
+    await page.locator('#file-filter').fill('');
+
+    // Reload restores the workspace, open tabs and contents.
+    await saved();
+    await page.reload();
+    await page.waitForFunction(() => document.querySelectorAll('#document-tabs .document-tab').length === 2);
+    assert.equal(await page.locator('#content').inputValue(), 'SECOND');
+    assert.equal(await page.locator('#feed').inputValue(), '900');
+
+    // 梳串 before simulating: generated programs are regenerated, hand-edited ones are kept and reported.
+    await page.locator('#document-tabs .document-tab-name').filter({ hasText: '未命名' }).click();
+    await page.locator('#gcode-tab').click();
+    await page.locator('#gcode').press('End');
+    await page.locator('#gcode').type('\n; my edit');
+    await page.locator('#edit-tab').click();
+    await page.locator('#content').fill('CHANGED');
+    await page.locator('#start').click();
+    await page.waitForFunction(() => document.querySelector('#log').innerText.includes('手动版本'));
+    await accept(); // "simulate the existing (stale) program?"
+    await page.locator('#stop').click();
+    assert((await page.locator('#gcode').inputValue()).includes('; my edit'));
+    await page.locator('#path-regenerate').click();
+    assert(!(await page.locator('#gcode').inputValue()).includes('; my edit'));
+    await saved();
+
+    // Another tab edits the same file: this tab picks it up when simulating (no unsaved work here).
+    const other = await context.newPage();
+    await other.goto(url);
+    await other.locator('#document-tabs .document-tab-name').filter({ hasText: '未命名' }).click();
+    await other.locator('#edit-tab').click();
+    await other.locator('#content').fill('FROM OTHER TAB');
+    await other.waitForFunction(() => document.querySelector('#save-indicator').textContent === '已保存');
+    await page.locator('#start').click();
+    await page.waitForFunction(() => document.querySelector('#content').value === 'FROM OTHER TAB');
+    // The other tab already regenerated its program, so the reloaded pair is consistent.
+    await page.waitForFunction(() => document.querySelector('#log').innerText.includes('已重新载入'));
+    await page.waitForFunction(() => document.querySelector('#log').innerText.includes('正文与 G-code 一致'));
+    await page.locator('#stop').click();
+    // Conflicting unsaved edits: the second writer gets a conflict and chooses what to keep.
+    await other.locator('#content').fill('OTHER AGAIN');
+    await other.waitForFunction(() => document.querySelector('#save-indicator').textContent === '已保存');
+    await page.locator('#edit-tab').click();
+    await page.locator('#content').fill('MINE');
+    await page.waitForFunction(() => !document.querySelector('#workspace-warning').hidden);
+    assert.equal(await page.locator('#save-indicator').textContent(), '保存冲突');
+    assert(await page.locator('#content').isDisabled());
+    await page.locator('#conflict-reload').click();
+    await accept();
+    await page.waitForFunction(() => document.querySelector('#content').value === 'OTHER AGAIN');
+    assert(!await page.locator('#content').isDisabled());
+    await other.close();
+
+    // Backup / import an archive into a folder; plain TXT import becomes a draft; TXT export is exact.
+    await saved();
+    let download = page.waitForEvent('download');
     await page.locator('#backup-workspace').click();
-    const backup = await downloaded;
-    assert(backup.suggestedFilename().endsWith('.json'));
-    await page.locator('#document-file').setInputFiles({ name:backup.suggestedFilename(), mimeType:'application/json', buffer:fs.readFileSync(await backup.path()) });
-    await page.waitForFunction(() => document.querySelectorAll('#document-list .document-entry').length === 4);
-    const names = await page.locator('#document-list .document-name').allTextContents();
-    assert.equal(new Set(names).size, names.length);
+    const backup = await download;
+    const archive = JSON.parse(fs.readFileSync(await backup.path(), 'utf8'));
+    assert.equal(archive.format, 'web-typewriter/workspace-archive');
+    assert(archive.files.some((file) => file.path === '信件/已重命名.wtl'));
+    await row('未命名').click();
+    await page.locator('#document-file').setInputFiles({ name: backup.suggestedFilename(), mimeType: 'application/json', buffer: fs.readFileSync(await backup.path()) });
+    await page.waitForFunction(() => [...document.querySelectorAll('#file-tree .tree-row')].some((el) => el.dataset.path === '我的工作区/信件'));
+    await page.locator('#file-tree .tree-row[data-path="我的工作区/信件"]').click();
+    await page.waitForFunction(() => [...document.querySelectorAll('#file-tree .tree-row')].some((el) => el.dataset.path === '我的工作区/信件/已重命名.wtl'));
     const body = Buffer.from('Imported exact body\nline 2');
-    await page.locator('#document-file').setInputFiles({ name:'imported.txt', mimeType:'text/plain', buffer:body });
+    await rowPath('未命名.wtl').click();
+    await page.locator('#document-file').setInputFiles({ name: 'imported.txt', mimeType: 'text/plain', buffer: body });
     await page.waitForFunction(() => document.querySelector('#content').value.startsWith('Imported exact'));
-    downloaded = page.waitForEvent('download');
+    download = page.waitForEvent('download');
     await page.locator('#export').click();
-    const txt = await downloaded;
+    const txt = await download;
     assert.equal(txt.suggestedFilename(), 'imported.txt');
-    assert.equal(fs.readFileSync(await txt.path(),'utf8'), body.toString());
+    assert.equal(fs.readFileSync(await txt.path(), 'utf8'), body.toString());
+
+    // Pen width is a workspace setting used by the paper and the toolpath.
+    await page.locator('[data-panel=settings]').click();
+    await page.locator('#pen-width').fill('1.2');
+    await page.locator('[data-panel=files]').click();
+    await page.locator('#path-tab').click();
+    await page.locator('#show-pen-width').check();
+    await page.waitForTimeout(500);
+    await page.reload();
+    await page.waitForFunction(() => document.querySelector('#pen-width').value === '1.2');
+    assert(await page.locator('#show-pen-width').isChecked());
+
+    // Close all tabs → welcome; reopen from the tree. Camera and sidebar resizing still work.
     while (await page.locator('#document-tabs .close-document').count()) await page.locator('#document-tabs .close-document').last().click();
     assert(await page.locator('#empty-workspace').isVisible());
-    assert.equal(await page.locator('#document-list .document-entry').count(), 5);
-    await page.locator('#document-list .file-item').first().click();
-    assert(!await page.locator('#empty-workspace').isVisible());
-    await page.locator('#gcode-tab').click();
-    await page.locator('#help').click();
-    await page.locator('#load-demo').click();
-    await acceptAction();
-    await page.waitForFunction(() => !document.querySelector('#path-view').hidden);
+    await rowPath('未命名.wtl').click();
+    await page.locator('#empty-workspace').waitFor({ state: 'hidden' });
+    await page.locator('#path-tab').click();
     await page.locator('#toolpath').hover();
-    await page.mouse.wheel(0,-300);
+    await page.mouse.wheel(0, -300);
     await page.waitForFunction(() => document.querySelector('#path-zoom').textContent !== '100%');
     await page.locator('#fit-path').click();
     assert.equal(await page.locator('#path-zoom').textContent(), '100%');
     await page.locator('#sidebar-resizer').focus();
-    const width = await page.locator('#sidebar').evaluate(el => el.offsetWidth);
+    const width = await page.locator('#sidebar').evaluate((el) => el.offsetWidth);
     await page.keyboard.press('ArrowRight');
-    assert.equal(await page.locator('#sidebar').evaluate(el => el.offsetWidth), width + 10);
-    if (process.env.SCREENSHOT) await page.screenshot({ path:process.env.SCREENSHOT });
-    const other = await context.newPage();
-    await other.goto(url);
-    await other.locator('#edit-tab').click();
-    await other.locator('#content').fill('OTHER TAB');
-    await page.waitForFunction(() => !document.querySelector('#workspace-warning').hidden);
-    assert(await page.locator('#content').isDisabled());
-    await page.locator('#reload-workspace').click();
-    await acceptAction();
-    await page.waitForFunction(() => document.querySelector('#content').value === 'OTHER TAB');
-    assert.equal(await page.locator('#content').inputValue(), 'OTHER TAB');
-    assert(!await page.locator('#content').isDisabled());
-    await other.close();
-    await page.setViewportSize({width:390,height:844});
+    assert.equal(await page.locator('#sidebar').evaluate((el) => el.offsetWidth), width + 10);
+
+    // Server workspace: real folder on the machine running server.py.
+    const wsName = `测试-${Date.now()}`;
+    await page.locator('[data-select-id=workspace-switcher]').click();
+    await page.getByRole('option', { name: /连接服务器工作区/ }).click();
+    await accept(key);
+    await page.locator('[data-select-id=workspace-switcher]').click();
+    await page.getByRole('option', { name: /新建服务器工作区/ }).click();
+    await accept(wsName);
+    await page.waitForFunction((name) => document.querySelector('#workspace-switcher').value === `server:${name}`, wsName);
+    await page.locator('#new-document').click();
+    await accept('服务器稿');
+    await page.locator('#content').fill('ON DISK');
+    await saved();
+    const listing = await page.evaluate(async ([name, secret]) => (await (await fetch(`/api/fs/list?ws=${encodeURIComponent(name)}`, { headers: { 'X-Bridge-Key': secret } })).json()).entries.map((entry) => entry.path), [wsName, key]);
+    assert.deepEqual(listing.sort(), ['workspace.wtw', '服务器稿.txt', '服务器稿.wtl'].sort());
+    const onDisk = await page.evaluate(async ([name, secret]) => (await (await fetch(`/api/fs/read?ws=${encodeURIComponent(name)}&path=${encodeURIComponent('服务器稿.txt')}`, { headers: { 'X-Bridge-Key': secret } })).json()).content, [wsName, key]);
+    assert.equal(onDisk, 'ON DISK');
+    // Switch back to the browser workspace; tabs come back.
+    await page.locator('[data-select-id=workspace-switcher]').click();
+    await page.getByRole('option', { name: '本浏览器 · 我的工作区' }).click();
+    await page.waitForFunction(() => document.querySelector('#workspace-switcher').value === 'browser:我的工作区');
+    await page.waitForFunction(() => document.querySelector('#document-tabs .document-tab'));
+
+    // Mobile layout: drawer explorer, simulation controls.
+    await page.setViewportSize({ width: 390, height: 844 });
     await page.reload();
     await page.locator('#gcode-tab').click();
-    await page.locator('#generate-code').click();
     await page.locator('#path-tab').click();
     await page.locator('#start').click();
-    await page.waitForTimeout(100);
     await page.locator('#pause').click();
-    assert.equal(await page.locator('#pause').textContent(),'继续');
+    assert.equal(await page.locator('#pause').textContent(), '继续');
     await page.locator('#stop').click();
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth),false);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     await page.locator('#sidebar-toggle').click();
+    assert(await page.locator('#file-tree').isVisible());
     assert(await page.locator('#new-document').isVisible());
-    await page.locator('[data-panel=settings]').click();
-    assert(await page.locator('#font-size').isVisible());
-    await page.locator('#sidebar-toggle').click();
-    await page.setViewportSize({width:1440,height:1000});
-    await page.evaluate(() => {
-      const original=Storage.prototype.setItem;
-      Storage.prototype.setItem=function(key,value) {
-        if(key==='web-typewriter:projects:v3') throw new DOMException('Quota exceeded','QuotaExceededError');
-        return original.call(this,key,value);
-      };
-    });
-    await page.locator('#edit-tab').click();
-    await page.locator('#content').fill('UNSAVED RECOVERY');
-    assert.equal(await page.locator('#save-indicator').textContent(),'未保存');
-    assert(await page.locator('#workspace-warning').isVisible());
-    downloaded=page.waitForEvent('download');
-    await page.locator('#rescue-workspace').click();
-    const rescue=await downloaded;
-    const rescued=JSON.parse(fs.readFileSync(await rescue.path(),'utf8'));
-    assert.equal(rescued.documents.find(doc => doc.id===rescued.activeId).content,'UNSAVED RECOVERY');
     assert.deepEqual(errors, []);
-    console.log('Workspace browser checks passed: files/code/settings isolation, rename/copy/delete/filter, find/replace, reload, backup+merge, exact TXT export, close/reopen, camera, resizing, cross-tab conflict recovery, mobile controls and quota-failure rescue.');
+    console.log('Workspace checks passed: drafts (txt + gcode + wtl), tree rename/move/copy/delete/filter, find/replace, reload, 梳串 (regenerate / manual / other tab), conflicts, backup + import, TXT export, pen width, close/reopen, camera, resizing, server workspace on disk, mobile.');
   } finally { await browser.close(); }
-})().catch(error => { console.error(error); process.exitCode = 1; });
+})().catch((error) => { console.error(error); process.exitCode = 1; });

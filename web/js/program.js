@@ -131,6 +131,10 @@ function stepSimulation(cursor) {
 }
 async function startSimulation() {
   if (hardwareJob || controllerBusy() || window.Workspace?.blocked) return;
+  $('#start').disabled = true;
+  // 梳串: save, pick up outside edits and bring the program in line with the text before running.
+  if (window.Workspace?.syncBeforeRun && !await window.Workspace.syncBeforeRun()) { updateTask(); return; }
+  if (hardwareJob || controllerBusy() || simulation.state === 'running') return;
   parseProgram();
   if (!drawable()) return;
   const target = window.Workspace?.activeId, source = codeEditor.value;

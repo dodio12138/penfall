@@ -127,11 +127,15 @@ function drawToolpath() {
   const acknowledgedLine = hardwareJob && traceVerified && hardware.ack > 0 ? toolpath.commands[hardware.ack - 1]?.line || 0 : 0;
   let current = { x: 0, y: 0, z: 0 }, currentLine = 0;
 
+  // Pen-width mode draws pen-down lines as wide as the real ink line (pen width × zoom).
+  const inkWidth = $('#show-pen-width').checked ? Math.max(1, (window.Workspace?.penWidth || .5) * view.scale) : 0;
+  ctx.lineCap = ctx.lineJoin = inkWidth ? 'round' : 'butt';
   // Batch the static drawing by style: far fewer canvas state changes on long programs.
   for (const drawing of [false, true]) {
     if (!drawing && !showTravel) continue;
     ctx.strokeStyle = color(drawing ? '--path-draw' : '--path-travel');
-    ctx.lineWidth = drawing ? 1.4 : .8;
+    ctx.lineWidth = drawing ? inkWidth || 1.4 : .8;
+    if (drawing && inkWidth) ctx.strokeStyle = '#c7d3e3d9';
     ctx.setLineDash(drawing ? [] : [4, 4]);
     ctx.beginPath();
     for (const segment of toolpath.segments) {
@@ -151,7 +155,7 @@ function drawToolpath() {
       currentLine = segment.line;
       if (segment.drawing || showTravel) {
         ctx.strokeStyle = color(segment.drawing ? '--success' : '--accent');
-        ctx.lineWidth = segment.drawing ? 2 : 1;
+        ctx.lineWidth = segment.drawing ? inkWidth || 2 : 1;
         ctx.beginPath(); ctx.moveTo(...view.toScreen(segment.from)); ctx.lineTo(...view.toScreen(current)); ctx.stroke();
       }
     }
@@ -169,6 +173,8 @@ function drawToolpath() {
 window.addEventListener('workspace-view', (event) => { if (event.detail === 'path') requestDraw(); });
 new ResizeObserver(() => requestDraw()).observe($('.path-stage'));
 $('#show-travel').addEventListener('change', drawToolpath);
+$('#show-pen-width').checked = localStorage.getItem('web-typewriter:show-pen-width') === '1';
+$('#show-pen-width').addEventListener('change', () => { try { localStorage.setItem('web-typewriter:show-pen-width', $('#show-pen-width').checked ? '1' : '0'); } catch { /* optional */ } drawToolpath(); });
 $('#fit-path').addEventListener('click', () => { resetPathCamera(); drawToolpath(); });
 (() => {
   const canvas = $('#toolpath');

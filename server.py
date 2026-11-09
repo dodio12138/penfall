@@ -10,8 +10,9 @@ import threading
 import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 from grbl import ProtocolError, Session
+from workspace_fs import FsError, WorkspaceRoot
 
 try:
     import serial
@@ -43,7 +44,31 @@ def is_asset(path):
     if path not in ASSETS and path.startswith('/glyphs/'):
         ASSETS = static_assets()
     return path in ASSETS
-TOKEN = secrets.token_urlsafe(24)
+PROJECT = Path(__file__).resolve().parent
+KEY_FILE = PROJECT / '.bridge-key'
+
+
+def load_key(path=KEY_FILE, renew=False):
+    """Stable access key across restarts (kept next to the server, readable only by this user)."""
+    try:
+        if not renew:
+            key = path.read_text(encoding='ascii').strip()
+            if re.fullmatch(r'[A-Za-z0-9_-]{24,64}', key):
+                return key
+    except OSError:
+        pass
+    key = secrets.token_urlsafe(24)
+    try:
+        path.write_text(key + '\n', encoding='ascii')
+        path.chmod(0o600)
+    except OSError:
+        pass
+    return key
+
+
+TOKEN = secrets.token_urlsafe(24)  # Replaced by load_key() when run as a program; tests use a fresh key.
+FILES = WorkspaceRoot(PROJECT / 'workspaces')
+DEFAULT_MANIFEST = json.dumps({'format': 'web-typewriter/workspace', 'version': 1, 'machine': {'penWidth': 0.5}}, ensure_ascii=False, indent=2) + '\n'
 SESSION = None
 WORKER = None
 LOCK = threading.RLock()
@@ -261,6 +286,10 @@ class Handler(SimpleHTTPRequestHandler):
             return super().do_GET()
         if not self.authorized():
             return
+        url = urlparse(self.path)
+        if url.path.startswith('/api/fs/'):
+            query = {key: values[0] for key, values in parse_qs(url.query).items()}
+            return self.files('GET', url.path[8:], query)
         if self.path == '/api/status':
             self.reply(snapshot())
         elif self.path == '/api/ports':
@@ -270,6 +299,40 @@ class Handler(SimpleHTTPRequestHandler):
                 self.reply({'ports': [{'path': p.device, 'name': p.description} for p in list_ports.comports()]})
         else:
             self.reply({'error': '未知接口'}, 404)
+
+    def files(self, method, action, data):
+        """Workspace file API (authenticated like the device API; separate from the device lock)."""
+        try:
+            ws = data.get('ws')
+            if method == 'GET' and action == 'workspaces':
+                result = {'workspaces': FILES.workspaces()}
+            elif method == 'POST' and action == 'workspaces':
+                result = {'workspace': FILES.create(data.get('name'), DEFAULT_MANIFEST)}
+            elif method == 'GET' and action == 'list':
+                result = {'entries': FILES.list(ws)}
+            elif method == 'GET' and action == 'read':
+                result = FILES.read(ws, data.get('path'))
+            elif method == 'POST' and action == 'write':
+                base = data['base'] if 'base' in data else ...
+                if base is not ... and base is not None and not isinstance(base, int):
+                    raise FsError('base 无效')
+                result = FILES.write(ws, data.get('path'), data.get('content'), base)
+            elif method == 'POST' and action == 'mkdir':
+                FILES.mkdir(ws, data.get('path'))
+                result = {}
+            elif method == 'POST' and action == 'rename':
+                FILES.rename(ws, data.get('from'), data.get('to'))
+                result = {}
+            elif method == 'POST' and action == 'delete':
+                FILES.delete(ws, data.get('path'))
+                result = {}
+            else:
+                raise FsError('未知文件接口', 404)
+            self.reply(result)
+        except FsError as error:
+            self.reply({'error': str(error), **error.extra}, error.status)
+        except OSError as error:
+            self.reply({'error': f'文件操作失败：{error.strerror or error}'}, 500)
 
     def do_POST(self):
         global SESSION, WORKER
@@ -282,6 +345,8 @@ class Handler(SimpleHTTPRequestHandler):
             data = json.loads(self.rfile.read(size))
             if not isinstance(data, dict):
                 raise ValueError('请求必须是对象')
+            if self.path.startswith('/api/fs/'):
+                return self.files('POST', self.path[8:], data)
             with CONTROL_LOCK:
                 live = WORKER is not None and WORKER.is_alive()
                 if self.path == '/api/connect':
@@ -406,7 +471,12 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--host', default='127.0.0.1', help='局域网访问显式指定 0.0.0.0')
     parser.add_argument('--port', default=5173, type=int)
+    parser.add_argument('--workspaces', default=str(PROJECT / 'workspaces'), help='服务器工作区根目录（每个子文件夹是一个工作区）')
+    parser.add_argument('--new-key', action='store_true', help='重新生成访问密钥（旧密钥立即失效）')
     args = parser.parse_args()
+    TOKEN = load_key(renew=args.new_key)
+    FILES = WorkspaceRoot(args.workspaces)
+    FILES.ensure()
     print(f'Web UI: http://{"localhost" if args.host in ("127.0.0.1", "0.0.0.0") else args.host}:{args.port}', flush=True)
     if args.host == '0.0.0.0':
         try:
@@ -415,7 +485,8 @@ if __name__ == '__main__':
                 print(f'局域网访问: http://{probe.getsockname()[0]}:{args.port}', flush=True)
         except OSError:
             pass
-    print(f'桥接访问密钥: {TOKEN}', flush=True)
+    print(f'访问密钥: {TOKEN}（保存在 .bridge-key，重启不变；--new-key 可更换）', flush=True)
+    print(f'服务器工作区: {FILES.root}', flush=True)
     print('仅用于可信局域网；HTTP 不加密，不要映射到公网。', flush=True)
     if serial is None:
         print('未安装 pyserial，USB 接口暂不可用。', flush=True)

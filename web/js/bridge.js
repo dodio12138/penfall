@@ -17,9 +17,12 @@ const LOCKED_BY_CONTROLLER = ['#content', '#title', '#gcode', '#generate', '#imp
 
 function controllerBusy() { return coordinateBusy || ['coordinate', 'sync', 'job'].includes(hardware.coordinates?.operation); }
 function refreshSendButton() {
-  const invalid = toolpath.errors.length > 0 || !toolpath.segments.length || Boolean(window.Workspace && (!window.Workspace.activeId || window.Workspace.blocked));
+  const noDocument = Boolean(window.Workspace && (!window.Workspace.activeId || window.Workspace.blocked));
+  const invalid = toolpath.errors.length > 0 || !toolpath.segments.length || noDocument;
+  // Simulation 梳串s first and can generate the program from the text, so text alone is enough to start.
+  const regenerable = !noDocument && !content.disabled && content.value.trim() && (programSource === 'generated' || !codeEditor.value.trim());
   const busy = hardwareJob || controllerBusy() || simulation.state === 'running' || simulation.state === 'paused';
-  $('#start').disabled = busy || invalid;
+  $('#start').disabled = busy || (invalid && !regenerable);
   $('#send-job').disabled = !bridgeHealthy || !hardware.connected || !window.Coordinates?.canSend() || busy || invalid;
 }
 function lockEditors(locked) {
@@ -102,6 +105,7 @@ function connectionButtons() {
   $('#serial-connect').disabled = hardware.connected || hardware.portOpen || hardwareJob || controllerBusy() || !$('#serial-port').value || !$('#bridge-key').value.trim() || !$('#protocol-confirm').checked;
   $('#serial-disconnect').disabled = !bridgeHealthy || !(hardware.connected || hardware.portOpen) || hardwareJob || controllerBusy();
   $('#refresh-ports').disabled = !$('#bridge-key').value.trim();
+  if ($('#bridge-key').value.trim()) bridgeKey = $('#bridge-key').value.trim();
 }
 async function bridgeAction(action) {
   try { applyHardware(await api(action, {})); }
@@ -150,6 +154,7 @@ async function connectSerial() {
   connectionButtons();
 }
 async function sendJob() {
+  if (window.Workspace?.syncBeforeRun && !await window.Workspace.syncBeforeRun()) { log('梳串失败（未保存或文件冲突），未发送。'); return; }
   parseProgram();
   if (!drawable()) return;
   if (programDirty) { log('G-code 与当前文稿 / 笔起点不一致（已过期），请重新生成后再发送；未发送任何内容。'); selectView('path'); return; }
@@ -210,5 +215,8 @@ $('#bridge-key').addEventListener('keydown', (event) => { if (event.key === 'Ent
 $('#serial-connect').addEventListener('click', connectSerial);
 $('#serial-disconnect').addEventListener('click', () => bridgeAction('disconnect'));
 $('#send-job').addEventListener('click', sendJob);
+// The access key is stable across server restarts (.bridge-key) and remembered on this device.
+try { const saved = localStorage.getItem('web-typewriter:bridge-key'); if (saved) { $('#bridge-key').value = saved; bridgeKey = saved; } } catch { /* optional */ }
+$('#bridge-key').addEventListener('change', () => { try { const value = $('#bridge-key').value.trim(); if (value) localStorage.setItem('web-typewriter:bridge-key', value); } catch { /* optional */ } });
 connectionButtons();
 setInterval(pollHardware, BRIDGE_POLL_MS);

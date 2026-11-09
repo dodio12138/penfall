@@ -192,7 +192,7 @@ function renderPreview() {
     }
     const scale = size / item.glyph.unitsPerEm;
     ctx.strokeStyle = ctx.fillStyle = '#30343a';
-    ctx.lineWidth = .35;
+    ctx.lineWidth = window.Workspace?.penWidth || .5; // real pen width in mm
     ctx.beginPath();
     for (const stroke of item.glyph.strokes) {
       ctx.moveTo(item.x + stroke[0][0] * scale, item.y + stroke[0][1] * scale);
@@ -238,7 +238,7 @@ function changed() {
   updateTask();
 }
 /** Switch the central view: 'editor' | 'gcode' | 'preview' | 'path'. */
-function selectView(view) {
+function selectView(view, { focus = true } = {}) {
   if (!(view in VIEWS)) view = 'editor';
   for (const [name, tabId] of Object.entries(VIEWS)) {
     const active = name === view;
@@ -249,7 +249,7 @@ function selectView(view) {
     tab.tabIndex = active ? 0 : -1;
   }
   if (view === 'preview') renderPreview();
-  if (view === 'editor' && !content.disabled) content.focus();
+  if (focus && view === 'editor' && !content.disabled) content.focus();
   window.dispatchEvent(new CustomEvent('workspace-view', { detail: view }));
 }
 function openConnection() {

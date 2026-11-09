@@ -17,6 +17,8 @@
     message.textContent=options.message||'';message.hidden=!options.message;
     document.querySelector('#action-field').hidden=current.mode!=='text';
     input.value=options.value||'';input.removeAttribute('aria-invalid');
+    input.type=options.type==='password'?'password':'text';
+    input.autocomplete='off';
     error.hidden=true;error.textContent='';
     accept.textContent=options.confirmLabel||'确定';
     accept.classList.toggle('danger-button',Boolean(options.danger));
@@ -35,7 +37,7 @@
     if(!current)return;
     if(current.mode==='text') {
       const value=input.value.trim();
-      const issue=!value?'请输入名称':(/[\\/\u0000-\u001f]/.test(value)?'名称不能包含斜杠或控制字符':'');
+      const issue=current.options.validate?current.options.validate(value):!value?'请输入名称':(/[\\/\u0000-\u001f]/.test(value)?'名称不能包含斜杠或控制字符':'');
       if(issue){error.textContent=issue;error.hidden=false;input.setAttribute('aria-invalid','true');input.focus();return;}
     }
     dialog.close('accept');

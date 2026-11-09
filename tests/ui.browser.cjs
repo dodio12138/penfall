@@ -26,8 +26,9 @@ async function bounds(page,selector) {
       page.on('pageerror',error=>errors.push(error.message));
       await page.goto(url);
       const files=Array.from({length:8},(_,i)=>({name:`${i+1}-用于检查长文件名称与多文稿布局的实际文稿.txt`,mimeType:'text/plain',buffer:Buffer.from('HELLO 123')}));
+      await page.locator('#content:not([disabled])').waitFor(); // workspace opened
       await page.locator('#document-file').setInputFiles(files);
-      await page.waitForFunction(()=>document.querySelectorAll('#document-list .document-entry').length===9);
+      await page.waitForFunction(()=>document.querySelectorAll('#file-tree .tree-row.type-link').length===9);
       if(width<=900) assert(await page.locator('#sidebar-backdrop').isHidden());
       await page.locator('[data-panel=files]').click();
       const originalTitle=await page.title();
@@ -43,7 +44,7 @@ async function bounds(page,selector) {
       assert.equal(await page.title(),originalTitle);
       for(let index=0;index<9;index++) {
         await page.locator('[data-panel=files]').click();
-        await page.locator('#document-list .document-entry > .file-item').nth(index).click();
+        await page.locator('#file-tree .tree-row.type-link').nth(index).click();
       }
       for(const id of ['edit-tab','gcode-tab','preview-tab','path-tab']) {
         await page.locator(`#${id}`).click();
