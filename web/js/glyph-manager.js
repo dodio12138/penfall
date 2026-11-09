@@ -51,6 +51,7 @@ function glyphLocked() {
 const GlyphDB = (() => {
   let opening = null;
   const open = () => opening || (opening = new Promise((resolve, reject) => {
+    // Internal name kept from before the rename to Penfall (existing imported libraries stay).
     const request = indexedDB.open('web-typewriter-glyphs', 1);
     request.onupgradeneeded = () => request.result.createObjectStore('libraries', { keyPath: 'id' });
     request.onsuccess = () => resolve(request.result);

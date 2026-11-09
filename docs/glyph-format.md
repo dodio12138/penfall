@@ -1,5 +1,7 @@
 # 字形库与选字格式（v1）
 
+> 旧标识 `web-typewriter/glyph-library`（改名前）仍可导入。
+
 目标：把「文字」与「每个字实际用哪一笔写法」关联起来，同时让字库来源可替换（内置单线字、服务器字库、导入 / 手写采集的字库）。
 
 分两种数据：
@@ -17,7 +19,7 @@
 
 ```json
 {
-  "format": "web-typewriter/glyph-library",
+  "format": "penfall/glyph-library",
   "version": 1,
   "id": "my-hand",
   "name": "我的手写体",

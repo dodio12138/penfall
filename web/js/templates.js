@@ -1,7 +1,8 @@
 /* Templates (.wtt): page format + ruling + starter text for new drafts. Pure logic, shared with Node tests. */
 (function (root) {
   'use strict';
-  const FORMAT = 'web-typewriter/template';
+  const FORMAT = 'penfall/template';
+  const LEGACY_FORMAT = 'web-typewriter/template'; // before the rename: still accepted
   // Layout keys a template may set (same names as the draft's settings).
   const KEYS = ['paper', 'orientation', 'font', 'font-size', 'line-gap', 'letter-gap', 'margin', 'gutter', 'bg-kind', 'bg-cell', 'bg-gap', 'bg-write', 'bg-pen'];
   const BUILTIN = [
@@ -16,7 +17,7 @@
   ].map((template) => ({ format: FORMAT, version: 1, text: '', ...template, builtin: true }));
 
   function normalizeTemplate(raw, fallbackName = '模板') {
-    if (!raw || raw.format !== FORMAT || raw.version !== 1) throw Error('不是模板文件（format 应为 web-typewriter/template）');
+    if (!raw || (raw.format !== FORMAT && raw.format !== LEGACY_FORMAT) || raw.version !== 1) throw Error('不是模板文件（format 应为 penfall/template）');
     const settings = {};
     for (const key of KEYS) if (typeof raw.settings?.[key] === 'string' && raw.settings[key].length <= 20) settings[key] = raw.settings[key];
     return {

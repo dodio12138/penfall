@@ -217,7 +217,7 @@ $('#serial-connect').addEventListener('click', connectSerial);
 $('#serial-disconnect').addEventListener('click', () => bridgeAction('disconnect'));
 $('#send-job').addEventListener('click', sendJob);
 // The access key is stable across server restarts (.bridge-key) and remembered on this device.
-try { const saved = localStorage.getItem('web-typewriter:bridge-key'); if (saved) { $('#bridge-key').value = saved; bridgeKey = saved; } } catch { /* optional */ }
-$('#bridge-key').addEventListener('change', () => { try { const value = $('#bridge-key').value.trim(); if (value) localStorage.setItem('web-typewriter:bridge-key', value); } catch { /* optional */ } });
+try { const saved = localStorage.getItem('penfall:bridge-key'); if (saved) { $('#bridge-key').value = saved; bridgeKey = saved; } } catch { /* optional */ }
+$('#bridge-key').addEventListener('change', () => { try { const value = $('#bridge-key').value.trim(); if (value) localStorage.setItem('penfall:bridge-key', value); } catch { /* optional */ } });
 connectionButtons();
 setInterval(pollHardware, BRIDGE_POLL_MS);

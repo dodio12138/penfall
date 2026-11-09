@@ -3,9 +3,11 @@
 (function (root) {
   'use strict';
   const Glyphs = typeof module !== 'undefined' && module.exports ? require('./glyphs.js') : root.Glyphs;
-  const LINK_FORMAT = 'web-typewriter/link';
-  const WORKSPACE_FORMAT = 'web-typewriter/workspace';
-  const ARCHIVE_FORMAT = 'web-typewriter/workspace-archive';
+  const LINK_FORMAT = 'penfall/link';
+  const WORKSPACE_FORMAT = 'penfall/workspace';
+  const ARCHIVE_FORMAT = 'penfall/workspace-archive';
+  // Files written before the project was renamed (web-typewriter → Penfall) are still accepted.
+  const isFormat = (value, current) => value === current || value === current.replace('penfall/', 'web-typewriter/');
   const MANIFEST = 'workspace.wtw';
   const TEXT_TYPES = ['.txt', '.md'];
   const CODE_TYPES = ['.gcode', '.nc', '.tap'];
@@ -154,7 +156,7 @@
 
   function normalizeLink(raw, linkPath) {
     const value = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
-    if (value.format !== undefined && value.format !== LINK_FORMAT) throw Error('不是稿件链接文件（format 应为 web-typewriter/link）');
+    if (value.format !== undefined && !isFormat(value.format, LINK_FORMAT)) throw Error('不是稿件链接文件（format 应为 penfall/link）');
     const name = stem(linkPath || 'untitled.wtl');
     const sibling = (key, fallback, types) => (typeof value[key] === 'string' && validPart(value[key]) && types.includes(extname(value[key])) ? value[key] : fallback);
     const sync = value.sync && typeof value.sync === 'object' ? value.sync : {};
@@ -209,7 +211,7 @@
 
   function normalizeManifest(raw) {
     const value = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
-    if (value.format !== undefined && value.format !== WORKSPACE_FORMAT) throw Error('不是工作区清单（format 应为 web-typewriter/workspace）');
+    if (value.format !== undefined && !isFormat(value.format, WORKSPACE_FORMAT)) throw Error('不是工作区清单（format 应为 penfall/workspace）');
     const machine = value.machine && typeof value.machine === 'object' ? value.machine : {};
     const penWidth = Number.isFinite(machine.penWidth) && machine.penWidth >= .05 && machine.penWidth <= 5 ? machine.penWidth : .5;
     const pens = (Array.isArray(machine.pens) ? machine.pens : DEFAULT_PENS).filter((pen) => pen && typeof pen.name === 'string' && /^#[0-9a-f]{6}$/i.test(pen.color || '')).slice(0, 8).map((pen) => ({ name: pen.name.trim().slice(0, 12) || '笔', color: pen.color.toLowerCase() }));
@@ -268,7 +270,7 @@
   }
 
   function normalizeArchive(raw) {
-    if (!raw || raw.format !== ARCHIVE_FORMAT || raw.version !== 1 || !Array.isArray(raw.files)) throw Error('不是工作区备份（format 应为 web-typewriter/workspace-archive）');
+    if (!raw || !isFormat(raw.format, ARCHIVE_FORMAT) || raw.version !== 1 || !Array.isArray(raw.files)) throw Error('不是工作区备份（format 应为 penfall/workspace-archive）');
     const dirs = (Array.isArray(raw.dirs) ? raw.dirs : []).filter((path) => validPath(path, 'dir'));
     const files = raw.files.filter((file) => file && validPath(file.path) && typeof file.content === 'string' && file.content.length <= 1_500_000);
     if (files.length > 5000) throw Error('备份文件过多');

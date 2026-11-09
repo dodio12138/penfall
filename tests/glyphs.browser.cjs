@@ -4,6 +4,7 @@
 const {chromium}=require('playwright');
 const assert=require('node:assert/strict');
 const url=process.env.TEST_URL||'http://127.0.0.1:5173';
+// Old (pre-rename) format identifier on purpose: still accepted.
 const library={format:'web-typewriter/glyph-library',version:1,id:'test-hand',name:'测试手写',unitsPerEm:1000,glyphs:[
   {char:'龘',variants:[{id:'a',advance:1000,strokes:[[[100,100],[100,900]]]},{id:'b',advance:1000,strokes:[[[200,100],[800,900]]]},{id:'c',advance:1000,strokes:[[[500,500],[600,600]]]}]},
 ]};

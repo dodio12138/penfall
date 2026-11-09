@@ -195,7 +195,7 @@
   document.addEventListener('pointerdown',event=>{if(openMenuButton&&!openMenuButton.contains(event.target)&&!$(`#${openMenuButton.getAttribute('aria-controls')}`).contains(event.target))closePopup();},true);
   window.addEventListener('resize',()=>closePopup());
   // Collapsible sidebar sections remember whether they are open.
-  const PANES='web-typewriter:panes';
+  const PANES='penfall:panes';
   let paneState={};
   try{paneState=JSON.parse(localStorage.getItem(PANES)||'{}');}catch{/* defaults */}
   for(const pane of $$('details.pane')){

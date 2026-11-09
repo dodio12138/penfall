@@ -4,7 +4,7 @@
 //   write(path, content, base) → {mtime}      base: undefined = overwrite, null = create only, number = expected mtime
 //   mkdir(path)   rename(from, to)   remove(path)
 // A write whose `base` no longer matches fails with error.conflict = true (edited in another tab / program).
-const SERVER_KEY_STORAGE = 'web-typewriter:bridge-key';
+const SERVER_KEY_STORAGE = 'penfall:bridge-key';
 
 class FsConflict extends Error {
   constructor(message, mtime) { super(message); this.conflict = true; this.mtime = mtime; }
@@ -14,6 +14,7 @@ class FsConflict extends Error {
 const BrowserFS = (() => {
   let opening = null;
   const open = () => opening || (opening = new Promise((resolve, reject) => {
+    // Internal name kept from before the rename to Penfall: existing browser workspaces stay where they are.
     const request = indexedDB.open('web-typewriter-files', 1);
     request.onupgradeneeded = () => {
       const db = request.result;

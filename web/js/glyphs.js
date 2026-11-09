@@ -1,7 +1,8 @@
 /* Glyph libraries + per-document glyph selection (see docs/glyph-format.md). Pure logic; also used by Node tests. */
 (function (root) {
   'use strict';
-  const FORMAT = 'web-typewriter/glyph-library';
+  const FORMAT = 'penfall/glyph-library';
+  const LEGACY_FORMAT = 'web-typewriter/glyph-library'; // name before the project was renamed: still accepted
   const BUILTIN_ID = 'builtin-latin';
   const STRATEGIES = ['first', 'cycle', 'random'];
   const LIBRARY_ID = /^[a-z0-9][a-z0-9._-]{0,63}$/;
@@ -13,7 +14,7 @@
 
   /** Validate a library file; returns a clean, serializable copy or throws a readable error. */
   function normalizeLibrary(raw) {
-    if (!raw || raw.format !== FORMAT || raw.version !== 1) throw Error('不是 v1 字形库文件（format 应为 web-typewriter/glyph-library）。');
+    if (!raw || (raw.format !== FORMAT && raw.format !== LEGACY_FORMAT) || raw.version !== 1) throw Error('不是 v1 字形库文件（format 应为 penfall/glyph-library）。');
     if (!LIBRARY_ID.test(raw.id || '')) throw Error('字库 id 无效：1–64 位小写字母、数字、- _ .');
     const unitsPerEm = raw.unitsPerEm === undefined ? 1000 : raw.unitsPerEm;
     if (!Number.isFinite(unitsPerEm) || unitsPerEm < 16 || unitsPerEm > 16384) throw Error('unitsPerEm 无效。');

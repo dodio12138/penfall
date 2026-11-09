@@ -154,7 +154,7 @@ const key = fs.readFileSync(path.join(__dirname, '../.bridge-key'), 'utf8').trim
     await page.locator('#backup-workspace').click();
     const backup = await download;
     const archive = JSON.parse(fs.readFileSync(await backup.path(), 'utf8'));
-    assert.equal(archive.format, 'web-typewriter/workspace-archive');
+    assert.equal(archive.format, 'penfall/workspace-archive');
     assert(archive.files.some((file) => file.path === '信件/已重命名.wtl'));
     await row('未命名').click();
     await page.locator('#document-file').setInputFiles({ name: backup.suggestedFilename(), mimeType: 'application/json', buffer: fs.readFileSync(await backup.path()) });

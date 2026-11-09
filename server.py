@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Same-origin UI + authenticated GRBL 1.1 bridge. Never expose to the Internet."""
+"""落笔 Penfall — web UI, workspace files and an authenticated GRBL 1.1 bridge. Never expose to the Internet."""
 import argparse
 import json
 import math
@@ -68,7 +68,7 @@ def load_key(path=KEY_FILE, renew=False):
 
 TOKEN = secrets.token_urlsafe(24)  # Replaced by load_key() when run as a program; tests use a fresh key.
 FILES = WorkspaceRoot(PROJECT / 'workspaces')
-DEFAULT_MANIFEST = json.dumps({'format': 'web-typewriter/workspace', 'version': 1, 'machine': {'penWidth': 0.5}}, ensure_ascii=False, indent=2) + '\n'
+DEFAULT_MANIFEST = json.dumps({'format': 'penfall/workspace', 'version': 1, 'machine': {'penWidth': 0.5}}, ensure_ascii=False, indent=2) + '\n'
 SESSION = None
 WORKER = None
 LOCK = threading.RLock()

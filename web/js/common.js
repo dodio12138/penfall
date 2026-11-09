@@ -4,6 +4,16 @@ const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 const MAX_LOG_LINES = 150;
 
+// The project was renamed web-typewriter → Penfall: carry over this browser's preferences once.
+// (Old *data* keys such as projects:v3 keep their names; they are only read for migration.)
+try {
+  for (const key of Object.keys(localStorage)) {
+    if (!/^web-typewriter:(ws-state:|workspace:current$|migrated-to-files$|bridge-key$|show-pen-width$|panes$)/.test(key)) continue;
+    const next = key.replace('web-typewriter:', 'penfall:');
+    if (localStorage.getItem(next) === null) localStorage.setItem(next, localStorage.getItem(key));
+  }
+} catch { /* storage unavailable: nothing to carry over */ }
+
 /** File-system safe name; keeps CJK, strips path separators and control characters. */
 function safeFilename(name, fallback = '无题') {
   return (String(name || '').trim() || fallback).replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_');

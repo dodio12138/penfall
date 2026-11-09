@@ -1,4 +1,4 @@
-"""Outline font → single-line glyph library (web-typewriter/glyph-library v1) by skeletonization.
+"""Outline font → single-line glyph library (penfall/glyph-library v1) by skeletonization.
 
     .venv/bin/python -m pip install -r tools/requirements.txt
     .venv/bin/python tools/skeleton_font.py FONT.ttf OUT.json --id skeleton-kai --name "骨架楷体（单线）" \
@@ -323,7 +323,7 @@ def main():
                 print(f'{index}/{len(chars)}', file=sys.stderr, flush=True)
     license_text = open(args.license_file, encoding='utf-8').read() if args.license_file else ''
     library = {
-        'format': 'web-typewriter/glyph-library', 'version': 1, 'id': args.id, 'name': args.name,
+        'format': 'penfall/glyph-library', 'version': 1, 'id': args.id, 'name': args.name,
         'author': args.author, 'description': args.description,
         'license': (args.copyright + '\n\n' + license_text).strip()[:200] if not license_text else 'SIL Open Font License 1.1（全文见同目录 LICENSE 文件）。' + args.copyright,
         'unitsPerEm': UNITS, 'glyphs': glyphs,

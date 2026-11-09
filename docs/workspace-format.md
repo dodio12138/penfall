@@ -1,12 +1,14 @@
 # 工作区与稿件格式（v1）
 
+> 落笔 Penfall 改名前写入的文件使用 `web-typewriter/…` 作为 format 标识，仍可读取；再次保存时改写为 `penfall/…`。
+
 ## 概念
 
 | 名称 | 是什么 | 文件 |
 |---|---|---|
 | **工作区** | 一个文件夹，相当于 VS Code 打开的项目文件夹 | 根目录下的 `workspace.wtw` 保存本工作区共用的机器设置 |
 | **稿件** | 一份要书写的东西：正文和它的 G-code 成对出现 | `名称.wtl`（链接）+ `名称.txt`（正文）+ `名称.gcode`（程序） |
-| 模板 | 新建稿件时使用的版式与起始正文 | `名称.wtt`（`web-typewriter/template`：`name`、`description`、`settings`、`text`） |
+| 模板 | 新建稿件时使用的版式与起始正文 | `名称.wtt`（`penfall/template`：`name`、`description`、`settings`、`text`） |
 | 单独文件 | 没有链接的 `.txt` / `.md` / `.gcode` / `.nc` / `.tap` | 可直接打开；单独的正文一旦生成 G-code，会自动补上 `.wtl` 变成稿件 |
 
 文件树按 VS Code 的「文件嵌套」方式显示：`名称.wtl` 显示为一个「稿」节点，同名的 `.txt` 和 `.gcode` 嵌套在它下面。打开稿件后，「正文」和「G-code」是同一稿件的两页。
@@ -19,7 +21,7 @@
 ## `workspace.wtw`
 
 ```json
-{ "format": "web-typewriter/workspace", "version": 1, "machine": { "penWidth": 0.5, "pens": [{ "name": "黑", "color": "#1f2328" }, { "name": "红", "color": "#d0342c" }] } }
+{ "format": "penfall/workspace", "version": 1, "machine": { "penWidth": 0.5, "pens": [{ "name": "黑", "color": "#1f2328" }, { "name": "红", "color": "#d0342c" }] } }
 ```
 
 - `machine.penWidth`：笔在纸上画出的线宽（mm，0.05–5），用于纸张预览，以及刀轨页「按笔宽显示」。
@@ -29,7 +31,7 @@
 
 ```json
 {
-  "format": "web-typewriter/link",
+  "format": "penfall/link",
   "version": 1,
   "text": "给妈妈.txt",
   "gcode": "给妈妈.gcode",
@@ -74,4 +76,4 @@
 
 ## 备份
 
-「备份工作区」下载一个 JSON 文件（`web-typewriter/workspace-archive`），包含全部文件，以及本页尚未保存的内容。导入备份时，会在所选文件夹下新建一个同名文件夹放置这些文件，不覆盖已有文件。旧版的浏览器文稿备份（v3）导入时会自动转换为稿件。第一次打开新版时，旧版浏览器中的文稿会自动转换到「我的工作区」，旧数据保留不删。
+「备份工作区」下载一个 JSON 文件（`penfall/workspace-archive`），包含全部文件，以及本页尚未保存的内容。导入备份时，会在所选文件夹下新建一个同名文件夹放置这些文件，不覆盖已有文件。旧版的浏览器文稿备份（v3）导入时会自动转换为稿件。第一次打开新版时，旧版浏览器中的文稿会自动转换到「我的工作区」，旧数据保留不删。

@@ -82,3 +82,13 @@ test('applying run / paragraph formatting splits and merges like a word processo
   style = Links.applyParagraph(style, [3], { align: 'left' });
   assert.deepEqual(style.paras, [{ at: 0, align: 'center' }]);
 });
+
+test('files written before the rename to Penfall are still accepted and saved with the new identifier', () => {
+  const Templates = require('../web/js/templates.js');
+  const link = Links.normalizeLink({ format: 'web-typewriter/link', text: 'a.txt' }, 'a.wtl');
+  assert.equal(link.format, 'penfall/link');
+  assert.equal(Links.normalizeManifest({ format: 'web-typewriter/workspace' }).format, 'penfall/workspace');
+  assert.equal(Links.normalizeArchive({ format: 'web-typewriter/workspace-archive', version: 1, files: [] }).format, 'penfall/workspace-archive');
+  assert.equal(Templates.normalizeTemplate({ format: 'web-typewriter/template', version: 1, name: 'x' }).format, 'penfall/template');
+  assert.throws(() => Links.normalizeLink({ format: 'something-else/link' }, 'a.wtl'), /稿件链接/);
+});

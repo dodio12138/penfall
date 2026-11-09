@@ -176,8 +176,8 @@ function drawToolpath() {
 window.addEventListener('workspace-view', (event) => { if (event.detail === 'path') requestDraw(); });
 new ResizeObserver(() => requestDraw()).observe($('.path-stage'));
 $('#show-travel').addEventListener('change', drawToolpath);
-$('#show-pen-width').checked = localStorage.getItem('web-typewriter:show-pen-width') === '1';
-$('#show-pen-width').addEventListener('change', () => { try { localStorage.setItem('web-typewriter:show-pen-width', $('#show-pen-width').checked ? '1' : '0'); } catch { /* optional */ } drawToolpath(); });
+$('#show-pen-width').checked = localStorage.getItem('penfall:show-pen-width') === '1';
+$('#show-pen-width').addEventListener('change', () => { try { localStorage.setItem('penfall:show-pen-width', $('#show-pen-width').checked ? '1' : '0'); } catch { /* optional */ } drawToolpath(); });
 $('#fit-path').addEventListener('click', () => { resetPathCamera(); drawToolpath(); });
 (() => {
   const canvas = $('#toolpath');

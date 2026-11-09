@@ -20,7 +20,7 @@ const glyphs = base.glyphs.filter((glyph) => !/[a-z]/.test(glyph.char)).map((gly
     ...Object.entries(transforms).map(([id, t]) => ({ id, advance: t.advance, tags: ['程序生成'], strokes: glyph.variants[0].strokes.map((stroke) => (id === 'wave' ? densify(stroke) : stroke).map((point) => t.map(point).map(round))) })),
   ],
 }));
-const library = Glyphs.normalizeLibrary({ format: Glyphs.FORMAT, version: 1, id: 'demo-variants', name: '演示变体（程序生成，非手写）', author: 'web-typewriter', license: '随本项目提供', description: '由内置单线英文程序变形得到的 4 种写法，仅用于演示选字与变体切换，不代表真实手写。', unitsPerEm: 1000, glyphs });
+const library = Glyphs.normalizeLibrary({ format: Glyphs.FORMAT, version: 1, id: 'demo-variants', name: '演示变体（程序生成，非手写）', author: 'Penfall', license: '随本项目提供', description: '由内置单线英文程序变形得到的 4 种写法，仅用于演示选字与变体切换，不代表真实手写。', unitsPerEm: 1000, glyphs });
 const out = path.join(__dirname, '../web/glyphs');
 fs.writeFileSync(path.join(out, 'demo-variants.json'), JSON.stringify(library));
 fs.writeFileSync(path.join(out, 'index.json'), JSON.stringify({ libraries: [{ id: library.id, name: library.name, file: 'demo-variants.json', chars: library.glyphs.length, description: library.description }] }, null, 2) + '\n');

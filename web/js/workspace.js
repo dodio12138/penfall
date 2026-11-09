@@ -2,9 +2,9 @@
 // VS Code–style workspace: a folder of .txt / .gcode files; a .wtl draft links one text with its program
 // (docs/workspace-format.md). Editors stay the single source of truth while a document is open.
 (() => {
-  const STATE_PREFIX = 'web-typewriter:ws-state:';
-  const CURRENT_KEY = 'web-typewriter:workspace:current';
-  const MIGRATED_KEY = 'web-typewriter:migrated-to-files';
+  const STATE_PREFIX = 'penfall:ws-state:';
+  const CURRENT_KEY = 'penfall:workspace:current';
+  const MIGRATED_KEY = 'penfall:migrated-to-files';
   const SAVE_DELAY = 300;
   const motionDefaults = { feed: '1200', 'pen-up': '5', 'pen-down': '0', page: '1', 'page-set': 'all', 'text-pen': '1', pen: 'all', ...ORIGIN_DEFAULTS };
   const TYPE_LABEL = { '.txt': 'TXT', '.md': 'MD', '.gcode': 'GC', '.nc': 'NC', '.tap': 'TAP', '.wtw': 'WS', '.wtl': '稿', '.wtt': '模', '.svg': 'SVG', '.dxf': 'DXF' };
@@ -315,7 +315,7 @@
   }
   function renderChrome() {
     const doc = active();
-    document.title = doc ? `${docLabel(doc)} — 写字机工作台` : '写字机工作台';
+    document.title = doc ? `${docLabel(doc)} — 落笔` : '落笔 Penfall';
     $('#window-title').textContent = doc ? `${docLabel(doc)} — ${fsys?.name || ''}` : fsys?.name || '';
     const crumbs = doc ? [fsys?.name, ...Links.dirname(doc.key).split('/').filter(Boolean), docLabel(doc)] : [];
     $('#breadcrumbs').textContent = crumbs.join(' › ') + (doc?.kind === 'link' ? (currentView === 'gcode' || currentView === 'path' ? ` › ${Links.basename(doc.paths.gcode)}` : ` › ${Links.basename(doc.paths.text)}`) : '');
